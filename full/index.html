@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CMS Quản trị khóa — SQL Workflow (DEMO)</title>
+<link rel="stylesheet" href="../vendor/bootstrap.min.css">
+<link rel="stylesheet" href="../vendor/fontawesome.min.css">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+
+<div class="wrapper">
+
+  <nav id="sidebar">
+    <div class="sidebar-header">
+      <span class="brand">SQL WORKFLOW</span>
+    </div>
+    <ul class="components" id="nav"></ul>
+  </nav>
+
+  <div id="content">
+    <div class="navbar">
+      <button class="btn btn-info btn-sm" id="btnCollapse" title="Thu gọn menu">
+        <i class="fa fa-align-left"></i>
+      </button>
+      <span class="app-title">SQL Workflow</span>
+      <span class="demo-flag ml-3">BẢN DEMO — DỮ LIỆU GIẢ LẬP</span>
+      <span class="spacer"></span>
+      <div class="user-box">
+        <span class="avatar">HT</span>
+        <span>hangttm9 <i class="fa fa-caret-down ml-1 muted"></i></span>
+      </div>
+    </div>
+
+    <div class="p-breadcrumb" id="crumb"></div>
+    <div class="page-body" id="view"></div>
+
+    <div class="footer-ver">Phiên bản: DEMO-CMS-KEY 0.1 | Nguyên mẫu trực quan, không kết nối OpenBao thật</div>
+  </div>
+</div>
+
+<div id="modalRoot"></div>
+<div id="tipbox" role="tooltip"></div>
+
+<script src="app.js"></script>
+</body>
+</html>
