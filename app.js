@@ -396,6 +396,7 @@ const TIP = {
       '<b>Chứng thư TLS (PKI)</b> — có cả hai. Nộp CSR thì <span class="ok">private key không bao giờ rời khỏi máy mình</span>',
       '<b>Credential CSDL</b> — chỉ OpenBao sinh. Nhập tay thì mất hết ý nghĩa vì credential phải tự xóa khi hết hạn',
       '<b>API secret (KV v2)</b> — <span class="ok">nhập sẵn là cách chính</span>. API key của bên thứ ba thì mình đâu tự sinh được',
+      '<span class="warn">⚠️ Đừng lấy nút <b>Import</b> của Infisical ra ước lượng.</span> Bên đó Import là <b>tải lên một tệp .json</b> chứa thẳng key material — chỉ là thêm bản ghi. Trên OpenBao, nhập khóa là quy trình bọc hai lớp AES-KWP rồi RSA-OAEP, phải viết code ở phía client',
     ],
     map: [
       ['Transit', '<code>POST /v1/transit/keys/:name</code>'],
@@ -403,6 +404,7 @@ const TIP = {
       ['PKI — nộp CSR', '<code>POST /v1/pki/sign/:role</code>'],
       ['Database', '<code>GET /v1/database/creds/:role</code>'],
       ['KV v2', '<code>POST /v1/kv/data/:path</code>'],
+      ['Transit — nhập sẵn (KHÔNG xây)', '<code>POST /v1/transit/keys/:name/import</code> · cần <code>GET /v1/transit/wrapping_key</code> trước'],
     ],
     json: null,
   },
