@@ -17,7 +17,7 @@ const MIME = {
 
 http.createServer((req, res) => {
   let rel = decodeURIComponent(req.url.split('?')[0]);
-  if (rel.charAt(rel.length - 1) === '/') rel += 'index.html'; // /full/ → /full/index.html
+  if (rel.charAt(rel.length - 1) === '/') rel += 'index.html'; // /  → /index.html
   const file = path.join(ROOT, path.normalize(rel).replace(/^([/\\])+/, ''));
 
   if (!file.startsWith(ROOT)) { res.writeHead(403).end('Forbidden'); return; }

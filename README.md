@@ -20,8 +20,12 @@ OpenBao lo phần lõi bảo mật — sinh khóa, cất khóa, xoay khóa, thu 
 Nguyên mẫu này phác họa **lớp nghiệp vụ** mà OpenBao không có:
 
 1. **Sổ hồ sơ khóa** — khóa nào cấp cho ai, theo hồ sơ nào, hết hạn khi nào
-2. **Tạm khóa** — trạng thái tạm dừng có thể khôi phục
-3. **Nhật ký & báo cáo** — phục vụ kiểm toán
+2. **Điều khiển phiên bản khi xoay khóa** — để đổi khóa không làm gãy tích hợp với đối tác
+3. **Chặn trước các trần thời hạn** — thay vì để OpenBao từ chối bằng thông báo kỹ thuật
+4. **Nhật ký & báo cáo** — phục vụ kiểm toán
+
+> Nguyên mẫu **không có chức năng tạm khóa**. OpenBao không có trạng thái tạm dừng khôi phục được,
+> nên nghiệp vụ chỉ còn hai khả năng: đang dùng, hoặc thu hồi vĩnh viễn.
 
 ## Cách xem
 
@@ -29,6 +33,7 @@ Nguyên mẫu này phác họa **lớp nghiệp vụ** mà OpenBao không có:
 |---|---|
 | Danh mục khóa | Toàn bộ nghiệp vụ nằm trên một danh sách |
 | Danh mục đối tượng | Khai báo đối tượng được cấp khóa |
+| Thiết lập hạ tầng | **Chỉ đọc** — role, kết nối CSDL và trần thời hạn của từng mount |
 | Nhật ký & báo cáo | Đầu ra cho kiểm toán |
 
 Bấm vào biểu tượng **(i)** cạnh mỗi trường / tiêu đề cột / nút bấm để xem giải thích:
@@ -54,7 +59,6 @@ app.css      giao diện
 app.js       dữ liệu giả lập + toàn bộ màn hình và hộp thoại
 server.js    máy chủ tĩnh tối giản, không cần npm install
 vendor/      Bootstrap 4 + Font Awesome (thư viện nguồn mở, để chạy offline)
-full/        bản phác thảo đầu tiên 7 menu — giữ lại để đối chiếu
 ```
 
 ## Ghi chú

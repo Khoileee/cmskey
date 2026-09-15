@@ -3,7 +3,7 @@
    Không phê duyệt · không phân quyền · không SLA
 
    Trạng thái (5):
-     Chưa xong bàn giao → Đang hiệu lực → Tạm khóa / Thu hồi / Hết hiệu lực
+     Chưa xong bàn giao → Đang hiệu lực → Thu hồi / Hết hiệu lực
    Khóa nội bộ bỏ qua bước bàn giao, tạo xong là Đang hiệu lực.
 
    Dữ liệu giả lập, không kết nối OpenBao thật.
@@ -24,7 +24,6 @@ const TODAY_ISO = iso(TODAY);
 const ST = {
   CHUA_XONG: { l: 'Chưa xong bàn giao', c: 'st-warn' },
   HIEU_LUC: { l: 'Đang hiệu lực', c: 'st-ok' },
-  TAM_KHOA: { l: 'Tạm khóa', c: 'st-warn' },
   THU_HOI: { l: 'Thu hồi', c: 'st-bad' },
   HET_HAN: { l: 'Hết hiệu lực', c: 'st-idle' },
 };
@@ -55,6 +54,9 @@ const KEY_TYPES = [
   {
     code: 'SIGN', name: 'Khóa ký dữ liệu', engine: 'Transit',
     algos: ['rsa-2048', 'rsa-3072', 'rsa-4096', 'ecdsa-p256', 'ecdsa-p384', 'ed25519'],
+    create: [{ v: 'gen', l: 'OpenBao sinh khóa mới', ep: 'POST /v1/transit/keys/:name' }],
+    noImport: 'Transit có nhập khóa sẵn (BYOK) nhưng phải tự bọc khóa bằng wrapping key 4096-bit của OpenBao, và <b>khóa đã nhập thì chỉ xoay được nếu bật <code>allow_rotation</code> lúc nhập; xoay rồi là không nhập thêm bản nào được nữa</b> — đá nhau với yêu cầu xoay khóa hằng năm.',
+    dl: 'public', role: false,
     ttl: [{ h: M1, l: '1 tháng' }, { h: M3, l: '3 tháng' }, { h: M6, l: '6 tháng' }, { h: M12, l: '12 tháng (trần)' }],
     ttlDef: M12, ttlField: 'auto_rotate_period',
     autoExpire: false,
@@ -63,6 +65,9 @@ const KEY_TYPES = [
   {
     code: 'ENC', name: 'Khóa mã hóa', engine: 'Transit',
     algos: ['aes256-gcm96', 'chacha20-poly1305', 'rsa-2048', 'rsa-4096'],
+    create: [{ v: 'gen', l: 'OpenBao sinh khóa mới', ep: 'POST /v1/transit/keys/:name' }],
+    noImport: 'Giống khóa ký — nhập sẵn phải qua BYOK phức tạp và làm hỏng khả năng xoay khóa.',
+    dl: 'public-if-rsa', role: false,
     ttl: [{ h: M1, l: '1 tháng' }, { h: M3, l: '3 tháng' }, { h: M6, l: '6 tháng' }, { h: M12, l: '12 tháng (trần)' }],
     ttlDef: M12, ttlField: 'auto_rotate_period',
     autoExpire: false,
@@ -71,6 +76,11 @@ const KEY_TYPES = [
   {
     code: 'CERT', name: 'Chứng thư TLS', engine: 'PKI',
     algos: ['rsa/2048', 'rsa/4096', 'ec/256', 'ec/384'],
+    create: [
+      { v: 'gen', l: 'OpenBao sinh cặp khóa và cấp chứng thư', ep: 'POST /v1/pki/issue/:role' },
+      { v: 'csr', l: 'Mình tự sinh khóa, chỉ nộp CSR để ký', ep: 'POST /v1/pki/sign/:role' },
+    ],
+    dl: 'cert', role: 'PKI',
     ttl: [{ h: M1, l: '1 tháng' }, { h: M3, l: '3 tháng' }, { h: M6, l: '6 tháng' }, { h: M12, l: '12 tháng (trần)' }],
     ttlDef: M12, ttlField: 'ttl',
     autoExpire: true,
@@ -79,6 +89,9 @@ const KEY_TYPES = [
   {
     code: 'DBC', name: 'Credential CSDL', engine: 'Database',
     algos: ['— engine tự sinh user/password'],
+    create: [{ v: 'gen', l: 'OpenBao tự sinh user/password', ep: 'GET /v1/database/creds/:role' }],
+    noImport: 'Không nhập được. Credential do chính OpenBao tạo trên CSDL thật rồi tự xóa khi hết hạn — nhập tay thì mất toàn bộ ý nghĩa.',
+    dl: '', role: 'DATABASE',
     ttl: [{ h: 1, l: '1 giờ' }, { h: 24, l: '24 giờ' }, { h: 168, l: '7 ngày' }, { h: 720, l: '30 ngày (trần)' }],
     ttlDef: 720, ttlField: 'default_ttl',
     autoExpire: true,
@@ -87,6 +100,11 @@ const KEY_TYPES = [
   {
     code: 'SEC', name: 'API secret / keytab', engine: 'KV v2',
     algos: ['— chỉ lưu dữ liệu, không có thuật toán'],
+    create: [
+      { v: 'input', l: 'Nhập giá trị sẵn có', ep: 'POST /v1/kv/data/:path' },
+      { v: 'gen', l: 'Sinh chuỗi ngẫu nhiên rồi lưu', ep: 'POST /v1/kv/data/:path' },
+    ],
+    dl: '', role: false,
     ttl: [{ h: M3, l: '3 tháng' }, { h: M6, l: '6 tháng' }, { h: M12, l: '12 tháng' }],
     ttlDef: M6, ttlField: null,
     autoExpire: false,
@@ -94,6 +112,45 @@ const KEY_TYPES = [
   },
 ];
 const KT = (c) => KEY_TYPES.find(k => k.code === c) || KEY_TYPES[0];
+
+/* Role do ADMIN tạo trước trong OpenBao — màn tạo khóa chỉ được CHỌN, không tạo mới.
+   Role là hàng rào bảo mật: nó chặn sẵn domain và trần thời hạn, không phụ thuộc UI kiểm tra đúng hay sai. */
+const ROLES = [
+  { type: 'PKI', name: 'scorehub-public-api', desc: 'Chứng thư cho cổng API công khai', domains: 'scorehub.example.vn', maxTtlH: M12 },
+  { type: 'PKI', name: 'scorehub-internal-mtls', desc: 'Chứng thư mTLS nội bộ giữa các service', domains: 'svc.internal', maxTtlH: M3 },
+  { type: 'DATABASE', name: 'scorehub-oracle-ro', desc: 'Chỉ đọc Oracle ScoreHub', conn: 'scorehub-oracle', maxTtlH: 720 },
+  { type: 'DATABASE', name: 'airflow-pg-rw', desc: 'Đọc ghi PostgreSQL Airflow', conn: 'airflow-pg', maxTtlH: 720 },
+  { type: 'DATABASE', name: 'report-mysql-ro', desc: 'Chỉ đọc MySQL báo cáo', conn: 'report-mysql', maxTtlH: 720 },
+];
+const rolesOf = (t) => ROLES.filter(r => r.type === t);
+const ROLE = (n) => ROLES.find(r => r.name === n) || null;
+
+/* Mount = chỗ engine được gắn vào OpenBao. Mỗi mount có trần riêng max_lease_ttl.
+   MẶC ĐỊNH CỦA OPENBAO LÀ 768h (32 NGÀY) — không tune thì chọn "12 tháng" sẽ bị từ chối,
+   kể cả khi role cho phép. Đây là trần dễ quên nhất. Nguồn: openbao.org/docs/configuration. */
+const SYS_MAX_LEASE_H = 768;
+const MOUNTS = [
+  { engine: 'Transit', path: 'transit/', tuned: true, maxLeaseH: 87600, note: 'Transit không phát lease nên trần này không chặn việc tạo khóa.' },
+  { engine: 'PKI', path: 'pki/', tuned: true, maxLeaseH: M12, note: 'Đã tune lên 8760h. Nếu để mặc định 768h thì không cấp nổi chứng thư 12 tháng.' },
+  { engine: 'Database', path: 'database/', tuned: false, maxLeaseH: SYS_MAX_LEASE_H, note: 'Để mặc định 768h — vẫn thoải mái vì credential CSDL dài nhất chỉ 30 ngày.' },
+  { engine: 'KV v2', path: 'kv/', tuned: false, maxLeaseH: 0, note: 'KV v2 không phát lease, không có trần thời hạn.' },
+];
+const MOUNT = (e) => MOUNTS.find(m => m.engine === e) || null;
+
+/* Kết nối CSDL do admin khai một lần — role Database bắt buộc trỏ vào một kết nối có sẵn */
+const CONNS = [
+  { name: 'scorehub-oracle', plugin: 'oracle-database-plugin', url: 'oracle://{{username}}:{{password}}@db-scorehub:1521/ORCL', roles: 'scorehub-oracle-ro' },
+  { name: 'airflow-pg', plugin: 'postgresql-database-plugin', url: 'postgresql://{{username}}:{{password}}@pg-airflow:5432/airflow', roles: 'airflow-pg-rw' },
+  { name: 'report-mysql', plugin: 'mysql-database-plugin', url: '{{username}}:{{password}}@tcp(mysql-report:3306)/', roles: 'report-mysql-ro' },
+];
+
+/* Trả về trần thấp nhất đang áp cho lựa chọn hiện tại, hoặc null nếu không vướng trần nào */
+function ttlCeiling(t, roleName, h) {
+  const m = MOUNT(t.engine), r = ROLE(roleName);
+  if (r && h > r.maxTtlH) return { kind: 'role', name: r.name, limitH: r.maxTtlH };
+  if (m && m.maxLeaseH && h > m.maxLeaseH) return { kind: 'mount', name: m.path, limitH: m.maxLeaseH, tuned: m.tuned };
+  return null;
+}
 const ttlLabel = (t, h) => (t.ttl.find(x => x.h === h) || { l: h + 'h' }).l;
 
 const extTag = (ext) => ext
@@ -117,24 +174,26 @@ const DB = {
   keys: [
     { id: 'KEY-2026-0014', obj: 'Ngân hàng Đối tác A', kt: 'SIGN', dossier: 'HĐ-2025/SCOREHUB/012', algo: 'rsa-2048', ttlH: M12, ver: 1, activeVer: 1, status: 'HIEU_LUC', eff: '2025-11-02', exp: '2026-11-02', bao: 'transit/keys/scorehub-fia-sign-2025', lockReason: '', sentAt: '2025-10-28', channel: 'SFTP + biên bản giấy', cfAt: '2025-11-01', cfBy: 'Ban CNTT đối tác' },
     { id: 'KEY-2026-0021', obj: 'Công ty Tài chính B', kt: 'ENC', dossier: 'HĐ-2025/SCOREHUB/019', algo: 'aes256-gcm96', ttlH: M12, ver: 2, activeVer: 2, status: 'HIEU_LUC', eff: '2025-09-15', exp: '2026-09-15', bao: 'transit/keys/scorehub-fib-enc-2025', lockReason: '', sentAt: '', channel: '', cfAt: '', cfBy: '' },
-    { id: 'KEY-2026-0033', obj: 'Ngân hàng Đối tác C', kt: 'SIGN', dossier: 'HĐ-2025/SCOREHUB/027', algo: 'ecdsa-p256', ttlH: M12, ver: 1, activeVer: 1, status: 'TAM_KHOA', eff: '2025-10-08', exp: '2026-10-08', bao: 'transit/keys/scorehub-fic-sign-2025', lockReason: '[Mức 3] Nghi ngờ lộ khóa — đang xác minh theo PYC-2026-0871', sentAt: '2025-10-01', channel: 'Portal', cfAt: '2025-10-06', cfBy: 'Phòng CNTT đối tác' },
+    { id: 'KEY-2026-0033', obj: 'Ngân hàng Đối tác C', kt: 'SIGN', dossier: 'HĐ-2025/SCOREHUB/027', algo: 'ecdsa-p256', ttlH: M12, ver: 1, activeVer: 1, status: 'THU_HOI', eff: '2025-10-08', exp: '2026-10-08', bao: 'transit/keys/scorehub-fic-sign-2025', lockReason: 'Xác định lộ khóa theo PYC-2026-0871 — thu hồi vĩnh viễn', sentAt: '2025-10-01', channel: 'Portal', cfAt: '2025-10-06', cfBy: 'Phòng CNTT đối tác' },
     { id: 'KEY-2026-0002', obj: 'Ngân hàng Đối tác D', kt: 'SIGN', dossier: 'HĐ-2026/SCOREHUB/003', algo: 'rsa-2048', ttlH: M12, ver: 1, activeVer: 1, status: 'CHUA_XONG', eff: '', exp: '', bao: 'transit/keys/scorehub-fid-sign-2026', lockReason: '', sentAt: '2026-08-20', channel: 'Portal đối tượng', cfAt: '', cfBy: '' },
     { id: 'KEY-2026-0005', obj: 'Công ty Tài chính E', kt: 'ENC', dossier: 'HĐ-2026/SCOREHUB/008', algo: 'rsa-4096', ttlH: M12, ver: 1, activeVer: 1, status: 'CHUA_XONG', eff: '', exp: '', bao: 'transit/keys/scorehub-fie-enc-2026', lockReason: '', sentAt: '', channel: '', cfAt: '', cfBy: '' },
     { id: 'KEY-2026-0041', obj: 'Công ty Tài chính B', kt: 'SIGN', dossier: 'HĐ-2025/SCOREHUB/019', algo: 'ecdsa-p256', ttlH: M12, ver: 2, activeVer: 2, status: 'HIEU_LUC', eff: '2025-11-30', exp: '2026-11-30', bao: 'transit/keys/scorehub-fib-sign-2025', lockReason: '', sentAt: '2026-08-05', channel: 'Email ký số', cfAt: '2026-08-12', cfBy: 'Phòng CNTT đối tác' },
-    { id: 'KEY-2026-0007', obj: 'Nhà cung cấp CDN X', kt: 'CERT', dossier: 'HĐ-MS-2026/041', algo: 'rsa/2048', ttlH: M12, ver: 1, activeVer: 1, status: 'HIEU_LUC', eff: '2026-03-01', exp: '2027-03-01', bao: 'pki/issue/scorehub-public-api', lockReason: '', sentAt: '2026-02-26', channel: 'Email ký số', cfAt: '2026-02-28', cfBy: 'Vận hành CDN' },
+    { id: 'KEY-2026-0007', obj: 'Nhà cung cấp CDN X', kt: 'CERT', dossier: 'HĐ-MS-2026/041', algo: 'rsa/2048', ttlH: M12, ver: 1, activeVer: 1, status: 'HIEU_LUC', eff: '2026-03-01', exp: '2027-03-01', bao: 'pki/issue/scorehub-public-api', role: 'scorehub-public-api', createMode: 'gen', lockReason: '', sentAt: '2026-02-26', channel: 'Email ký số', cfAt: '2026-02-28', cfBy: 'Vận hành CDN' },
     { id: 'KEY-2025-0018', obj: 'Ngân hàng Đối tác C', kt: 'SIGN', dossier: 'HĐ-2024/SCOREHUB/031', algo: 'rsa-2048', ttlH: M12, ver: 1, activeVer: 1, status: 'HET_HAN', eff: '2024-06-30', exp: '2026-06-30', bao: 'transit/keys/scorehub-fic-sign-2024', lockReason: '', sentAt: '2024-06-25', channel: 'SFTP', cfAt: '2024-06-28', cfBy: 'Phòng CNTT đối tác' },
     { id: 'KEY-2025-0009', obj: 'Ngân hàng Đối tác A', kt: 'SIGN', dossier: 'HĐ-2024/SCOREHUB/012', algo: 'rsa-2048', ttlH: M12, ver: 2, activeVer: 2, status: 'THU_HOI', eff: '2024-11-02', exp: '2025-11-02', bao: 'transit/keys/scorehub-fia-sign-2024', lockReason: 'Thu hồi theo lịch xoay khóa 2025', sentAt: '2024-10-28', channel: 'SFTP', cfAt: '2024-11-01', cfBy: 'Ban CNTT đối tác' },
 
-    { id: 'CRED-2026-0001', obj: 'ScoreHub Backend', kt: 'DBC', dossier: '', algo: '—', ttlH: 720, ver: 27, activeVer: 27, status: 'HIEU_LUC', eff: '2026-08-02', exp: '2026-09-01', bao: 'database/roles/scorehub-oracle', lockReason: '', sentAt: '', channel: '', cfAt: '', cfBy: '' },
-    { id: 'CRED-2026-0003', obj: 'Airflow', kt: 'DBC', dossier: '', algo: '—', ttlH: 720, ver: 9, activeVer: 9, status: 'HIEU_LUC', eff: '2026-07-30', exp: '2026-08-29', bao: 'database/roles/airflow-pg', lockReason: '', sentAt: '', channel: '', cfAt: '', cfBy: '' },
-    { id: 'CRED-2026-0004', obj: 'Cụm Spark', kt: 'SEC', dossier: '', algo: '—', ttlH: M12, ver: 4, activeVer: 4, status: 'TAM_KHOA', eff: '2026-02-01', exp: '2027-02-01', bao: 'kv/data/scorehub/spark-keytab', lockReason: '[Mức 2] Cụm Spark đang bảo trì — tạm dừng cấp phát', sentAt: '', channel: '', cfAt: '', cfBy: '' },
-    { id: 'CRED-2026-0005', obj: 'Report Service', kt: 'DBC', dossier: 'YCNB-2026/207', algo: '—', ttlH: 720, ver: 15, activeVer: 15, status: 'HIEU_LUC', eff: '2026-06-01', exp: '2026-07-01', bao: 'database/roles/report-mysql', lockReason: '', sentAt: '', channel: '', cfAt: '', cfBy: '' },
+    { id: 'CRED-2026-0001', obj: 'ScoreHub Backend', kt: 'DBC', dossier: '', algo: '—', ttlH: 720, ver: 27, activeVer: 27, status: 'HIEU_LUC', eff: '2026-08-02', exp: '2026-09-01', bao: 'database/creds/scorehub-oracle-ro', role: 'scorehub-oracle-ro', createMode: 'gen', lockReason: '', sentAt: '', channel: '', cfAt: '', cfBy: '' },
+    { id: 'CRED-2026-0003', obj: 'Airflow', kt: 'DBC', dossier: '', algo: '—', ttlH: 720, ver: 9, activeVer: 9, status: 'HIEU_LUC', eff: '2026-07-30', exp: '2026-08-29', bao: 'database/creds/airflow-pg-rw', role: 'airflow-pg-rw', createMode: 'gen', lockReason: '', sentAt: '', channel: '', cfAt: '', cfBy: '' },
+    { id: 'CRED-2026-0004', obj: 'Cụm Spark', kt: 'SEC', dossier: '', algo: '—', ttlH: M12, ver: 4, activeVer: 4, status: 'HIEU_LUC', eff: '2026-02-01', exp: '2027-02-01', bao: 'kv/data/scorehub/spark-keytab', lockReason: '', sentAt: '', channel: '', cfAt: '', cfBy: '' },
+    { id: 'CRED-2026-0005', obj: 'Report Service', kt: 'DBC', dossier: 'YCNB-2026/207', algo: '—', ttlH: 720, ver: 15, activeVer: 15, status: 'HIEU_LUC', eff: '2026-06-01', exp: '2026-07-01', bao: 'database/creds/report-mysql-ro', role: 'report-mysql-ro', createMode: 'gen', lockReason: '', sentAt: '', channel: '', cfAt: '', cfBy: '' },
     { id: 'CRED-2026-0006', obj: 'Ingest Pipeline', kt: 'SEC', dossier: 'YCNB-2026/188', algo: '—', ttlH: M6, ver: 3, activeVer: 3, status: 'HIEU_LUC', eff: '2026-04-20', exp: '2026-10-20', bao: 'kv/data/scorehub/kafka-secret', lockReason: '', sentAt: '', channel: '', cfAt: '', cfBy: '' },
   ],
   audit: [
     { at: '24/08/2026 16:02', act: 'Tạo khóa trên OpenBao', obj: 'KEY-2026-0005', reason: 'POST /v1/transit/keys — type=rsa-4096' },
     { at: '20/08/2026 10:47', act: 'Cập nhật bàn giao', obj: 'KEY-2026-0002', reason: 'Đã gửi qua Portal đối tượng' },
-    { at: '19/08/2026 08:20', act: 'TẠM KHÓA', obj: 'KEY-2026-0033', reason: 'Mức 3 — Nghi ngờ lộ khóa, PYC-2026-0871' },
+    { at: '19/08/2026 08:20', act: 'Thu hồi khóa', obj: 'KEY-2026-0033', reason: 'POST /v1/transit/keys/…/config · min_decryption_version = 2 · Xác định lộ khóa theo PYC-2026-0871' },
+    { at: '18/08/2026 15:40', act: 'Tải xuống', obj: 'KEY-2026-0007', reason: 'certificate + ca_chain · tệp key-2026-0007-certificate.pem' },
+    { at: '17/08/2026 09:12', act: 'Tạo khóa trên OpenBao', obj: 'KEY-2026-0007', reason: 'POST /v1/pki/issue/scorehub-public-api · ttl=8760h · private key trả về MỘT LẦN' },
     { at: '16/08/2026 00:05', act: 'Cảnh báo hết hạn T-30', obj: 'KEY-2026-0021', reason: 'Lịch xoay khóa hằng năm' },
     { at: '12/08/2026 14:31', act: 'Ghi nhận đối tác xác nhận → kích hoạt', obj: 'KEY-2026-0041', reason: 'Phòng CNTT đối tác' },
   ],
@@ -150,10 +209,10 @@ const EXTRA = {
   'KEY-2026-0007': { pkiRole: 'scorehub-public-api', cn: 'api.scorehub.example.vn', allowed: 'scorehub.example.vn', serial: '4a:1f:9c:22:e0:75:b3:8d:11:6f' },
   'KEY-2025-0018': { latest: 1, minDec: 2, minEnc: 2 },
   'KEY-2025-0009': { latest: 2, minDec: 3, minEnc: 3 },
-  'CRED-2026-0001': { dbRole: 'scorehub-oracle', leaseId: 'database/creds/scorehub-oracle/7Hk2mQ', leaseDur: '720h' },
-  'CRED-2026-0003': { dbRole: 'airflow-pg', leaseId: 'database/creds/airflow-pg/2Bd8nL', leaseDur: '720h' },
+  'CRED-2026-0001': { dbRole: 'scorehub-oracle-ro', conn: 'scorehub-oracle', leaseId: 'database/creds/scorehub-oracle-ro/7Hk2mQ', leaseDur: '720h' },
+  'CRED-2026-0003': { dbRole: 'airflow-pg-rw', conn: 'airflow-pg', leaseId: 'database/creds/airflow-pg-rw/2Bd8nL', leaseDur: '720h' },
   'CRED-2026-0004': { kvPath: 'scorehub/spark-keytab', kvVersion: 4 },
-  'CRED-2026-0005': { dbRole: 'report-mysql', leaseId: 'database/creds/report-mysql/5Xz1vT', leaseDur: '720h' },
+  'CRED-2026-0005': { dbRole: 'report-mysql-ro', conn: 'report-mysql', leaseId: 'database/creds/report-mysql-ro/5Xz1vT', leaseDur: '720h' },
   'CRED-2026-0006': { kvPath: 'scorehub/kafka-secret', kvVersion: 3 },
 };
 const EX = (id) => EXTRA[id] || {};
@@ -211,6 +270,25 @@ const TIP = {
     ],
     json: '// OpenBao chỉ nhận đơn vị s / m / h — không nhận "tháng"\n1 tháng  = "730h"      1 giờ   = "1h"\n3 tháng  = "2190h"     24 giờ  = "24h"\n6 tháng  = "4380h"     7 ngày  = "168h"\n12 tháng = "8760h"     30 ngày = "720h"',
   },
+  f_ttlcap: {
+    t: 'Vì sao thời hạn hay bị từ chối',
+    d: 'Thời hạn mình chọn phải lọt qua <b>ba cái trần chồng lên nhau</b>. Vướng bất kỳ cái nào là OpenBao từ chối — <span class="warn">không phải cứ role cho phép là chạy được.</span>',
+    vd: 'Role cho <code>8760h</code> nhưng mount để mặc định <code>768h</code> → chọn 12 tháng vẫn <b>lỗi</b>',
+    anh: [
+      '<b>Trần 1 — hệ thống.</b> <code>max_lease_ttl</code> trong file cấu hình OpenBao, mặc định <code>768h</code> (~32 ngày).',
+      '<b>Trần 2 — mount.</b> Mỗi engine gắn ở một mount, tune riêng được: <code>POST /v1/sys/mounts/pki/tune</code>. <span class="warn">Không tune thì vẫn là 768h.</span>',
+      '<b>Trần 3 — role.</b> <code>max_ttl</code> trên từng role. Đây là trần duy nhất anh Tộ nhìn thấy trên màn hình.',
+      'Ngoài ra chứng thư <b>không sống lâu hơn CA</b> cấp ra nó. CA còn 3 tháng thì không cấp nổi chứng thư 12 tháng.',
+      '<span class="ok">CMS chặn trước cả ba</span> để không phải gửi request rồi mới biết lỗi.',
+    ],
+    map: [
+      ['Trần hệ thống', '<code>max_lease_ttl</code> — file cấu hình, mặc định <code>768h</code>'],
+      ['Trần mount', '<code>POST /v1/sys/mounts/:path/tune</code>'],
+      ['Trần role', '<code>max_ttl</code> trên <code>pki/roles/:name</code>, <code>database/roles/:name</code>'],
+      ['Trần CA', 'hạn của chính chứng thư CA — không có tham số nào chỉnh được'],
+    ],
+    json: '# Admin nới trần mount (làm một lần)\nPOST /v1/sys/mounts/pki/tune\n{ "max_lease_ttl": "8760h" }\n\n# Xem trần hiện tại\nGET /v1/sys/mounts/pki/tune\n→ { "max_lease_ttl": 8760, "default_lease_ttl": 0 }\n\n# Thứ tự áp dụng: lấy giá trị NHỎ NHẤT trong\n#   ttl yêu cầu · max_ttl của role · max_lease_ttl của mount\n#   · max_lease_ttl hệ thống · hạn còn lại của CA',
+  },
   f_dossier: {
     t: 'Hồ sơ ràng buộc',
     d: 'Căn cứ pháp lý để cấp khóa. <b>Kiểm toán đối chiếu đúng trường này</b> — hỏi "cấp khóa cho ngân hàng này theo cái gì".',
@@ -251,26 +329,15 @@ const TIP = {
     map: [['Cả hai dòng', '<b>KHÔNG gọi API nào</b> — thuần ghi sổ']],
     json: null,
   },
-  f_lockLevel: {
-    t: 'Mức tạm khóa',
-    d: 'Anh Tú chỉ nói cần "khóa ở mức từng khóa riêng lẻ", <b>không nói mấy mức</b>. Chia 3 mức là đề xuất, chờ anh Tộ chốt.',
-    vd: 'Nghi lộ khóa → chọn Mức 3 để chặn thật ngay',
-    anh: [
-      '<b>Mức 1</b> — chỉ đánh dấu trên sổ. Không gọi API. Nghiệp vụ vẫn chạy',
-      '<b>Mức 2</b> — chặn xoay / cấp thêm / bàn giao. Chặn ở tầng CMS',
-      '<b>Mức 3</b> — chặn thật. Gọi API xuống OpenBao, mọi lệnh ký bị từ chối ngay',
-    ],
-    map: [
-      ['Mức 3 — cách A', '<code>min_encryption_version</code> = latest + 1'],
-      ['Mức 3 — cách B ⭐', '<b>soft delete</b> của OpenBao 2.0 — chặn dùng và chặn xoay, giữ nguyên khóa, khôi phục được'],
-    ],
-    json: 'POST /v1/transit/keys/scorehub-fid-sign-2026/config\n{ "min_encryption_version": 2 }   // latest_version(1) + 1\n\n// Mở khóa lại:\n{ "min_encryption_version": 0 }   // 0 = dùng bản mới nhất',
-  },
   f_lockReason: {
-    t: 'Lý do',
-    d: 'Bắt buộc nhập. <b>Kiểm toán chắc chắn hỏi tới</b> khi rà soát vì sao khóa bị dừng giữa chừng.',
-    vd: '<code>Nghi ngờ lộ khóa theo PYC-2026-0871</code>',
-    anh: ['Lưu vào nhật ký cùng thời điểm bấm', 'Không gửi xuống OpenBao'],
+    t: 'Lý do thu hồi',
+    d: 'Bắt buộc nhập. <b>Kiểm toán chắc chắn hỏi tới</b> khi rà soát vì sao khóa bị khai tử.<br>OpenBao thu hồi được nhưng <b>không ghi lại vì sao</b> — đó là việc của CMS.',
+    vd: '<code>Xác định lộ khóa theo PYC-2026-0871</code> · <code>Chấm dứt hợp đồng HĐ-2025/012</code>',
+    anh: [
+      'Lưu vào nhật ký cùng thời điểm bấm và mã khóa',
+      'Không gửi xuống OpenBao — chỉ nằm trong sổ CMS',
+      '<span class="warn">Thu hồi là vĩnh viễn. Không có thao tác hoàn tác.</span>',
+    ],
     map: null, json: null,
   },
   f_rotate: {
@@ -317,6 +384,132 @@ const TIP = {
     ],
     map: [['Tên khóa', 'đoạn <code>:name</code> / <code>:role</code> / <code>:path</code> trên URL']],
     json: 'POST /v1/transit/keys/scorehub-fid-sign-2026\n                      └──────────┬─────────┘\n                        tên khóa nằm trên URL',
+  },
+
+  /* ---------- Cách tạo khóa · Role · Tải xuống ---------- */
+  f_create: {
+    t: 'Cách tạo khóa',
+    d: 'Mỗi engine hỗ trợ cách khác nhau — <b>không phải loại nào cũng có đủ hai lựa chọn "sinh mới" và "nhập sẵn"</b>. Danh sách bên dưới chỉ hiện đúng cách mà engine đang chọn thật sự làm được.',
+    vd: 'Chứng thư TLS có <b>hai cách thật sự</b>: để OpenBao sinh cả cặp khóa, hoặc mình tự sinh khóa rồi chỉ nộp CSR.',
+    anh: [
+      '<b>Khóa ký / mã hóa (Transit)</b> — chỉ sinh mới. Nhập sẵn phải qua BYOK: tự bọc khóa bằng wrapping key 4096-bit, và <span class="warn">khóa đã nhập thì xoay khóa bị hạn chế</span>',
+      '<b>Chứng thư TLS (PKI)</b> — có cả hai. Nộp CSR thì <span class="ok">private key không bao giờ rời khỏi máy mình</span>',
+      '<b>Credential CSDL</b> — chỉ OpenBao sinh. Nhập tay thì mất hết ý nghĩa vì credential phải tự xóa khi hết hạn',
+      '<b>API secret (KV v2)</b> — <span class="ok">nhập sẵn là cách chính</span>. API key của bên thứ ba thì mình đâu tự sinh được',
+    ],
+    map: [
+      ['Transit', '<code>POST /v1/transit/keys/:name</code>'],
+      ['PKI — sinh mới', '<code>POST /v1/pki/issue/:role</code>'],
+      ['PKI — nộp CSR', '<code>POST /v1/pki/sign/:role</code>'],
+      ['Database', '<code>GET /v1/database/creds/:role</code>'],
+      ['KV v2', '<code>POST /v1/kv/data/:path</code>'],
+    ],
+    json: null,
+  },
+  f_csr: {
+    t: 'Nộp CSR thay vì để OpenBao sinh khóa',
+    d: '<b>CSR</b> = Certificate Signing Request. Mình tự sinh cặp khóa trên máy mình, rồi chỉ gửi <b>nửa công khai kèm chữ ký chứng minh mình giữ nửa bí mật</b> sang cho OpenBao ký.',
+    vd: '<code>openssl req -new -newkey rsa:2048 -nodes -keyout svc.key -out svc.csr</code>',
+    anh: [
+      '<span class="ok">Private key không bao giờ đi qua mạng</span> — đây là cách tài liệu OpenBao khuyến nghị',
+      'Role vẫn chặn được domain và trần thời hạn: CA quyết định lấy trường nào từ CSR, không phải cứ nộp gì là được nấy',
+      '<span class="warn">Đừng nhầm với <code>pki/sign-verbatim</code></span> — endpoint đó bỏ qua mọi ràng buộc của role, tài liệu OpenBao xếp vào nhóm nguy hiểm, chỉ operator mới được gọi',
+    ],
+    map: [['Ký CSR', '<code>POST /v1/pki/sign/:role</code> · tham số <code>csr</code>']],
+    json: 'POST /v1/pki/sign/scorehub-public-api\n{\n  "csr": "-----BEGIN CERTIFICATE REQUEST-----\\n...",\n  "common_name": "api.scorehub.example.vn",\n  "ttl": "8760h"\n}\n\n// Trả về certificate + issuing_ca + ca_chain\n// KHÔNG có private_key — vì OpenBao chưa từng thấy nó',
+  },
+  f_role: {
+    t: 'Role — do admin tạo trước',
+    d: 'Role là <b>hàng rào bảo mật do quản trị viên duyệt trước</b>. Màn tạo khóa <b>chỉ được chọn</b> role có sẵn, không tạo role mới.',
+    vd: '<code>scorehub-public-api</code> — chỉ cấp chứng thư cho <code>scorehub.example.vn</code>, trần 12 tháng',
+    anh: [
+      'Role chặn sẵn <b>domain được phép</b> và <b>trần thời hạn</b>',
+      'Không có role thì người dùng có thể xin chứng thư cho <b>domain bất kỳ</b>, biến CA nội bộ thành công cụ giả mạo',
+      'Chặn ở tầng OpenBao — <b>không phụ thuộc UI kiểm tra đúng hay sai</b>',
+      '<span class="warn">Đây là lỗi bản trước:</span> demo từng sinh một role riêng cho mỗi khóa. Sai — role dùng chung cho nhiều khóa',
+    ],
+    map: [
+      ['Role PKI', '<code>POST /v1/pki/roles/:name</code> — <code>allowed_domains</code>, <code>max_ttl</code>'],
+      ['Role Database', '<code>POST /v1/database/roles/:name</code> — <code>db_name</code>, <code>creation_statements</code>'],
+    ],
+    json: '// Admin tạo MỘT LẦN\nPOST /v1/pki/roles/scorehub-public-api\n{\n  "allowed_domains": "scorehub.example.vn",\n  "allow_subdomains": true,\n  "max_ttl": "8760h",\n  "key_type": "rsa",\n  "key_bits": 2048\n}\n\n// Sau đó cấp bao nhiêu chứng thư cũng dùng chung role này',
+  },
+  f_conn: {
+    t: 'Kết nối CSDL',
+    d: 'OpenBao <b>tự đăng nhập vào CSDL thật</b> để tạo và xóa tài khoản. Muốn thế thì phải khai trước đường kết nối và một tài khoản quản trị cho nó dùng.',
+    vd: '<code>scorehub-oracle</code> → <code>oracle://…@db-scorehub:1521/ORCL</code>',
+    anh: [
+      'Chỉ engine <b>Database</b> cần bước này. PKI không cần.',
+      '<code>{{username}}</code> và <code>{{password}}</code> trong URL là <b>chỗ OpenBao thay tài khoản quản trị vào</b>, không phải chỗ để gõ mật khẩu thật',
+      '<span class="warn">Tài khoản đó phải có quyền <code>CREATE USER</code> / <code>DROP USER</code></span> trên CSDL thật. Chỉ cấp quyền đọc thì xin credential sẽ lỗi ngay ở phía CSDL, không phải lỗi OpenBao',
+      '<code>allowed_roles</code> giới hạn role nào được dùng kết nối này — <b>thiếu tên role trong đây là bị từ chối</b>',
+    ],
+    map: [
+      ['Khai kết nối', '<code>POST /v1/database/config/:name</code>'],
+      ['Tham số bắt buộc', '<code>plugin_name</code>, <code>connection_url</code>, <code>allowed_roles</code>'],
+    ],
+    json: 'POST /v1/database/config/scorehub-oracle\n{\n  "plugin_name": "oracle-database-plugin",\n  "connection_url": "oracle://{{username}}:{{password}}@db-scorehub:1521/ORCL",\n  "allowed_roles": "scorehub-oracle-ro",\n  "username": "BAO_ADMIN",\n  "password": "..."\n}\n\n// Sau đó role mới trỏ vào được\nPOST /v1/database/roles/scorehub-oracle-ro\n{ "db_name": "scorehub-oracle", "creation_statements": "...", "default_ttl": "24h", "max_ttl": "720h" }',
+  },
+  f_prereq: {
+    t: 'Điều kiện tiên quyết',
+    d: 'CMS chỉ là lớp vỏ gọi API. <b>Thiếu bất kỳ điều kiện nào dưới đây thì OpenBao trả lỗi chứ không tự tạo giúp</b> — và lỗi sẽ hiện ra ở màn tạo khóa dù người dùng không làm gì sai.',
+    vd: 'Token còn hạn nhưng thiếu policy trên <code>pki/issue/*</code> → <code>403 permission denied</code>',
+    anh: [
+      'Toàn bộ do <b>admin hạ tầng</b> làm trực tiếp trên OpenBao, <b>làm một lần lúc dựng hệ thống</b>',
+      'Phân biệt hai loại TTL dễ nhầm: <b>TTL của token</b> (để gọi API) và <b>TTL của khóa</b> (thời hạn nghiệp vụ). Token hết hạn thì mọi thứ dừng, không liên quan khóa còn hạn hay không',
+      '<span class="warn">Bật engine không phải việc của CMS.</span> CMS không nên có nút "bật Transit" — quyền <code>sys/mounts</code> là quyền quản trị toàn hệ thống',
+      'Đề nghị: CMS có một màn <b>kiểm tra kết nối</b> chạy lúc khởi động để báo sớm, thay vì để người dùng bấm tạo khóa rồi mới lỗi',
+    ],
+    map: [
+      ['Unseal', '<code>PUT /v1/sys/unseal</code> — hoặc auto-unseal'],
+      ['Bật engine', '<code>POST /v1/sys/mounts/:path</code> — quyền admin'],
+      ['Xem trạng thái', '<code>GET /v1/sys/health</code> · <code>GET /v1/sys/seal-status</code>'],
+      ['Token', 'header <code>X-Vault-Token</code> trên mọi request'],
+      ['Namespace', 'header <code>X-Vault-Namespace</code> nếu có dùng'],
+    ],
+    json: '# CMS kiểm tra lúc khởi động\nGET /v1/sys/health\n→ { "initialized": true, "sealed": false, "standby": false }\n\n# Bật engine — ADMIN làm một lần, không phải việc của CMS\nPOST /v1/sys/mounts/transit   { "type": "transit" }\nPOST /v1/sys/mounts/pki       { "type": "pki" }\nPOST /v1/sys/mounts/database  { "type": "database" }\nPOST /v1/sys/mounts/kv        { "type": "kv", "options": { "version": "2" } }\n\n# Nới trần thời hạn cho mount PKI\nPOST /v1/sys/mounts/pki/tune  { "max_lease_ttl": "8760h" }',
+  },
+  f_kvvalue: {
+    t: 'Giá trị secret',
+    d: 'KV v2 <b>chỉ là kho lưu trữ</b> — không mã hóa nghiệp vụ, không sinh gì cả. Gõ giá trị vào, OpenBao cất giữ có phiên bản.',
+    vd: 'API key của bên thứ ba, token bot, nội dung tệp keytab mã hóa base64',
+    anh: [
+      'Đây là loại <b>duy nhất mà nhập tay là bình thường</b> — secret của bên thứ ba thì mình không tự sinh được',
+      'Ghi đè giá trị mới thì <code>version</code> tăng lên, bản cũ vẫn còn để rollback',
+      '<span class="warn">KV v2 không có TTL, không tự xoay</span> — CMS phải tự nhắc thay',
+    ],
+    map: [['Ghi', '<code>POST /v1/kv/data/:path</code> · body <code>{ "data": { ... } }</code>']],
+    json: 'POST /v1/kv/data/scorehub/kafka-secret\n{ "data": { "sasl_password": "..." } }\n\n→ { "data": { "version": 1, "created_time": "..." } }',
+  },
+  f_download: {
+    t: 'Tải xuống',
+    d: 'Xuất ra tệp để mang đi cài lên nơi cần dùng. <b>Chỉ tải được thứ được phép ra ngoài</b> — nút sẽ không hiện với loại khóa không có gì để tải.',
+    vd: 'Tải <code>public-key.pem</code> gửi cho ngân hàng đối tác để họ xác thực chữ ký của mình',
+    anh: [
+      '<b>Khóa ký</b> → tải <b>public key</b>. An toàn, đưa cho ai cũng được',
+      '<b>Chứng thư TLS</b> → tải <b>certificate + CA chain</b>',
+      '<b>Khóa mã hóa đối xứng</b> (<code>aes256-gcm96</code>, <code>chacha20</code>) → <span class="warn">không có gì để tải</span>, vì không có nửa công khai',
+      '<b>Credential CSDL · API secret</b> → <span class="warn">không cho tải</span>, đó là giá trị bí mật, ứng dụng phải tự lấy',
+      'Mỗi lần tải đều <b>ghi vào nhật ký</b> — kiểm toán truy được ai tải, lúc nào',
+    ],
+    map: [['Lấy từ đâu', '<code>GET /v1/transit/keys/:name</code> hoặc dữ liệu chứng thư đã lưu']],
+    json: null,
+  },
+  f_pkikey: {
+    t: '⚠️ Private key của chứng thư — chỉ trả về MỘT LẦN',
+    d: 'Khác hẳn Transit. Khi dùng <code>pki/issue</code>, <b>OpenBao sinh cặp khóa rồi trả cả private key về cho mình và KHÔNG giữ lại</b>. Mất là mất luôn, phải cấp chứng thư mới.',
+    vd: 'Cấp chứng thư cho Nginx → phải lưu ngay <code>.crt</code> và <code>.key</code> vào máy chủ đó',
+    anh: [
+      '<span class="warn">Không có endpoint nào đọc lại private key sau đó</span>',
+      'Màn Chi tiết của chứng thư <b>chỉ hiện metadata</b>, không hiện lại được key',
+      '<span class="ok">Muốn private key không bao giờ ra khỏi máy mình thì dùng cách nộp CSR</span> — <code>pki/sign</code> thay cho <code>pki/issue</code>',
+      'Đây là chỗ <b>quy tắc BR-01 của tài liệu bản trước viết sai</b> — nói tuyệt đối rằng private key không bao giờ rời OpenBao, nhưng điều đó chỉ đúng với Transit',
+    ],
+    map: [
+      ['<code>pki/issue</code>', 'trả về <code>certificate</code>, <code>private_key</code>, <code>ca_chain</code>, <code>serial_number</code>'],
+      ['<code>pki/sign</code>', 'chỉ trả <code>certificate</code> — không có private key'],
+    ],
+    json: null,
   },
 
   /* ---------- Public key & con trỏ phiên bản ---------- */
@@ -422,7 +615,6 @@ const TIP = {
     anh: [
       '<b>Chưa xong bàn giao</b> — khóa ĐÃ có trong OpenBao, chờ ghi nhận đã gửi + đối tác xác nhận',
       '<b>Đang hiệu lực</b> — đang được dùng để ký / mã hóa',
-      '<b>Tạm khóa</b> — tạm dừng, còn mở lại được',
       '<b>Thu hồi</b> — vĩnh viễn, không quay lại',
       '<b>Hết hiệu lực</b> — quá ngày hết hạn, CMS tự đổi',
     ],
@@ -432,13 +624,11 @@ const TIP = {
   th_act: {
     t: 'Cột Thao tác — nút nào hiện khi nào',
     d: 'Nút hiện ra <b>theo trạng thái của từng dòng</b>. Không phải dòng nào cũng có đủ nút.',
-    vd: 'Dòng Đang hiệu lực → thấy Tạm khóa / Xoay khóa / Thu hồi',
+    vd: 'Dòng Đang hiệu lực → thấy Xoay khóa / Thu hồi',
     anh: [
       '<b>Chi tiết</b> — luôn có. Xem hồ sơ, tham số OpenBao, nhật ký',
-      '<b>👁 Public key</b> — khóa bên ngoài. Xem và copy để gửi đối tác',
+      '<b>Public key / Chứng thư</b> — xem, copy, <b>tải xuống tệp .pem</b>. Chỉ hiện với loại khóa có thứ đưa ra ngoài được',
       '<b>Cập nhật bàn giao</b> — chỉ khi <i>Chưa xong bàn giao</i>. Điền 2 ngày là khóa vào hiệu lực',
-      '<b>Tạm khóa</b> — chỉ khi <i>Đang hiệu lực</i>. Có 3 mức',
-      '<b>Mở khóa</b> — chỉ khi <i>Tạm khóa</i>',
       '<b>Xoay khóa</b> — chỉ khi <i>Đang hiệu lực</i>. Sinh bản mới, con trỏ giữ nguyên',
       '<b>Thu hồi</b> — vĩnh viễn. Không có ở dòng đã Thu hồi / Hết hiệu lực',
     ],
@@ -451,7 +641,8 @@ const TIP = {
     anh: [
       '<b>Chưa xong bàn giao</b> — việc còn dở, cần đi hỏi đối tác',
       '<b>Sắp hết hạn ≤90 ngày</b> — cần bắt đầu chuẩn bị xoay khóa',
-      '<b>Đang tạm khóa</b> — đang có sự cố chưa xử lý dứt điểm',
+      '<b>Đã thu hồi</b> — khóa đã khai tử, giữ lại để đối soát với kiểm toán',
+      '<span class="warn">Không có nhóm "tạm khóa"</span> — OpenBao không hỗ trợ trạng thái tạm dừng, nghiệp vụ chỉ có dùng hoặc khai tử',
     ],
     map: null, json: null,
   },
@@ -472,7 +663,7 @@ const TIP = {
     vd: null,
     anh: [
       '<b>1. Quyển sổ</b> — khóa nào cấp cho ai, theo hồ sơ nào, hết hạn khi nào',
-      '<b>2. Nút Tạm khóa</b> — trạng thái tạm dừng có thể khôi phục, OpenBao không có',
+      '<b>2. Thu hồi có lý do</b> — OpenBao thu hồi được nhưng không ghi vì sao',
       '<b>3. Nhật ký &amp; báo cáo</b> — để trả lời kiểm toán',
     ],
     map: [['Nguyên tắc', 'CMS <b>không nằm trên đường chạy</b> nghiệp vụ hằng ngày. CMS sập, giao dịch vẫn chạy']],
@@ -498,9 +689,11 @@ const TIP = {
   th_log: {
     t: 'Nhật ký thao tác',
     d: 'Ghi lại <b>mọi thao tác đổi trạng thái</b>, kèm lý do người dùng nhập và tham số thật đã gửi xuống OpenBao.',
-    vd: '<code>TẠM KHÓA · KEY-2026-0033 · Mức 3 — min_encryption_version = 2 · Nghi lộ khóa PYC-2026-0871</code>',
+    vd: '<code>Thu hồi khóa · KEY-2026-0033 · min_decryption_version = 2 · Xác định lộ khóa theo PYC-2026-0871</code>',
     anh: [
-      'Cột <b>Lý do / tham số</b> ghi cả hai: vì sao làm, và đã gọi lệnh gì',
+      'Cột <b>Lý do / tham số</b> ghi cả hai: vì sao làm, và <b>đã gọi lệnh gì xuống OpenBao</b>',
+      'Ghi cả thao tác <b>Tải xuống</b> — kiểm toán truy được ai lấy public key, lúc nào',
+      'OpenBao có audit log riêng nhưng <b>chỉ ghi lệnh kỹ thuật, không ghi vì sao</b> — lý do chỉ có ở CMS',
       '<span class="warn">Đã bỏ cột Tài khoản vì chỉ 1 người dùng</span> — nếu sau này thêm người thì dữ liệu cũ không truy hồi được',
     ],
     map: null, json: null,
@@ -533,7 +726,7 @@ const API_DOC = {
   auto_rotate_period: 'Chu kỳ tự sinh bản mới. <code>"0"</code> = tắt. <span class="warn">Không nhận giá trị ngắn hơn 1 giờ. Đây KHÔNG phải hạn dùng — bản cũ vẫn sống.</span>',
   exportable: 'Cho phép xuất private key ra ngoài. <span class="warn">Bật rồi KHÔNG TẮT ĐƯỢC — CMS khóa cứng ở false.</span>',
   allow_plaintext_backup: 'Cho phép backup khóa dạng rõ. <span class="warn">Bật rồi KHÔNG TẮT ĐƯỢC — khóa cứng ở false.</span>',
-  min_encryption_version: 'Phiên bản tối thiểu được dùng để ký/mã hóa. <b>Đây là cách thực hiện Tạm khóa Mức 3.</b>',
+  min_encryption_version: 'Phiên bản tối thiểu được dùng để ký/mã hóa. <code>0</code> = dùng bản mới nhất.',
   min_decryption_version: 'Phiên bản tối thiểu còn được giải mã/xác thực. <b>Đây là cách cắt bản cũ khi hết hạn, và cách thu hồi khóa Transit.</b>',
   deletion_allowed: 'Cho phép xóa hẳn khóa. <b>KHÔNG phải tham số lúc tạo</b> — chỉ đặt được ở <code>POST /transit/keys/:name/config</code>. Khóa mới sinh <b>mặc định đã là <code>false</code></b> nên CMS không cần gửi gì. Nghiệp vụ giữ nguyên false để còn đối soát.',
   latest_version: '<b>OpenBao trả về.</b> Phiên bản mới nhất đang giữ.',
@@ -557,33 +750,6 @@ const API_DOC = {
   path: 'Đường dẫn <code>/kv/data/&lt;path&gt;</code>. KV v2 không có schema.',
   data: 'Nội dung tùy ý. <span class="warn">KV v2 KHÔNG có TTL, KHÔNG tự xoay.</span>',
   version: '<b>OpenBao trả về.</b> Số phiên bản dữ liệu.',
-};
-
-/* Tạm khóa Mức 3 — mỗi engine một cơ chế khác nhau.
-   PKI KHÔNG tạm dừng được: chứng thư đã cấp chỉ có thể thu hồi vĩnh viễn. */
-const LOCK3 = {
-  Transit: {
-    ok: true,
-    label: 'Mức 3 — Vô hiệu thật: chặn ký và giải mã',
-    cmd: (k, e) => `POST /v1/transit/keys/${k.bao.split('/').pop()}/config { "min_encryption_version": ${(e.latest || 0) + 1} }`,
-    effect: 'Gọi API xuống OpenBao — <code>min_encryption_version</code> = latest + 1. Mọi lệnh ký bị từ chối ngay, không phải sửa ứng dụng.',
-  },
-  PKI: {
-    ok: false,
-    why: 'Chứng thư đã cấp <b>không tạm dừng được</b>. OpenBao PKI chỉ có thu hồi vĩnh viễn bằng <code>serial_number</code>, không có trạng thái tạm dừng khôi phục được.',
-  },
-  Database: {
-    ok: true,
-    label: 'Mức 3 — Vô hiệu thật: thu hồi lease + chặn cấp mới',
-    cmd: (k, e) => `POST /v1/sys/leases/revoke { "lease_id": "${e.leaseId || '—'}" } + gỡ policy đọc database/creds/${e.dbRole || '—'}`,
-    effect: 'Thu hồi lease đang phát (user bị xóa khỏi CSDL) <b>và</b> gỡ policy để ứng dụng không xin được credential mới. <span class="warn">Không dùng min_encryption_version — engine Database không có tham số đó.</span>',
-  },
-  'KV v2': {
-    ok: true,
-    label: 'Mức 3 — Vô hiệu thật: gỡ quyền đọc',
-    cmd: (k, e) => `gỡ policy đọc kv/data/${e.kvPath || '—'}`,
-    effect: 'Gỡ policy đọc đường dẫn đó. <span class="warn">KV v2 không có min_encryption_version — chặn bằng phân quyền là cách duy nhất.</span>',
-  },
 };
 
 const DANGER = { exportable: 1, allow_plaintext_backup: 1, no_store: 1 };
@@ -627,7 +793,7 @@ function apiParams(k) {
     P('format', 'pem', 0, B);
     R('serial_number', e.serial || '—'); R('expiration', fmt(k.exp));
   } else if (t.engine === 'Database') {
-    P('db_name', e.dbRole || '—'); P('default_ttl', k.ttlH + 'h'); P('max_ttl', k.ttlH + 'h');
+    P('db_name', e.conn || '—'); P('default_ttl', k.ttlH + 'h'); P('max_ttl', k.ttlH + 'h');
     P('creation_statements', '(DBA soạn)', 1);
     R('lease_id', e.leaseId || '—'); R('lease_duration', e.leaseDur || '—');
   } else {
@@ -640,14 +806,11 @@ function apiParams(k) {
 /* ---- Nút thao tác theo trạng thái ---- */
 function actionsFor(k) {
   const a = [`<a data-act="detail" data-id="${k.id}">Chi tiết</a>`];
-  if (OBJ(k.obj).ext && KT(k.kt).engine !== 'Database') a.push(`<a data-act="pubkey" data-id="${k.id}"><i class="fa fa-eye"></i> Public key</a>`);
+  if (dlOf(k)) a.push(`<a data-act="pubkey" data-id="${k.id}"><i class="fa fa-download"></i> ${KT(k.kt).engine === 'PKI' ? 'Chứng thư' : 'Public key'}</a>`);
   if (k.status === 'CHUA_XONG') a.push(`<a data-act="deliv" data-id="${k.id}">Cập nhật bàn giao</a>`, `<a data-act="revoke" data-id="${k.id}" class="danger">Thu hồi</a>`);
-  else if (k.status === 'HIEU_LUC') {
-    if (LOCK3[KT(k.kt).engine].ok) a.push(`<a data-act="lock" data-id="${k.id}">Tạm khóa</a>`);
-    else a.push(`<span class="muted" style="font-size:12.5px;margin-right:9px" title="Chứng thư không tạm dừng được">Tạm khóa —</span>`);
-    a.push(`<a data-act="rotate" data-id="${k.id}">Xoay khóa</a>`, `<a data-act="revoke" data-id="${k.id}" class="danger">Thu hồi</a>`);
-  }
-  else if (k.status === 'TAM_KHOA') a.push(`<a data-act="unlock" data-id="${k.id}">Mở khóa</a>`, `<a data-act="revoke" data-id="${k.id}" class="danger">Thu hồi</a>`);
+  else if (k.status === 'HIEU_LUC') a.push(
+    `<a data-act="rotate" data-id="${k.id}">Xoay khóa</a>`,
+    `<a data-act="revoke" data-id="${k.id}" class="danger">Thu hồi</a>`);
   return a.join('');
 }
 
@@ -660,9 +823,13 @@ const NAV = [
   { group: 'Quản trị khóa (đề xuất mới)', isNew: true },
   { icon: 'fa-key', label: 'Danh mục khóa', route: 'keys' },
   { icon: 'fa-address-book', label: 'Danh mục đối tượng', route: 'objs' },
+  { icon: 'fa-sliders-h', label: 'Thiết lập hạ tầng', route: 'setup' },
   { icon: 'fa-file-alt', label: 'Nhật ký & báo cáo', route: 'audit' },
 ];
-const TITLES = { keys: 'Danh mục khóa', objs: 'Danh mục đối tượng', audit: 'Nhật ký & báo cáo' };
+const TITLES = {
+  keys: 'Danh mục khóa', objs: 'Danh mục đối tượng',
+  setup: 'Thiết lập hạ tầng', audit: 'Nhật ký & báo cáo',
+};
 
 function renderNav() {
   const cur = route();
@@ -683,7 +850,7 @@ const QF = [
   { k: '', l: 'Tất cả', f: () => true },
   { k: 'bangiao', l: 'Chưa xong bàn giao', f: (x) => x.status === 'CHUA_XONG' },
   { k: 'hethan', l: 'Sắp hết hạn ≤90 ngày', f: (x) => x.status === 'HIEU_LUC' && x.exp && days(x.exp) <= 90 },
-  { k: 'khoa', l: 'Đang tạm khóa', f: (x) => x.status === 'TAM_KHOA' },
+  { k: 'thuhoi', l: 'Đã thu hồi', f: (x) => x.status === 'THU_HOI' },
 ];
 
 function viewKeys() {
@@ -797,12 +964,107 @@ function viewObjs() {
   </div>`;
 }
 
-/* ---------------- MÀN 3 — NHẬT KÝ ---------------- */
+/* ---------------- MÀN 3 — THIẾT LẬP HẠ TẦNG (chỉ đọc) ----------------
+   Màn này KHÔNG phải để anh Tộ khai báo. Nó trả lời đúng một câu hỏi:
+   "cái dropdown Role lúc tạo khóa ở đâu ra, và vì sao thời hạn bị chặn".
+   Mọi thứ ở đây do admin hạ tầng làm trực tiếp trên OpenBao. */
+function viewSetup() {
+  const mountRows = MOUNTS.map(m => `<tr>
+    <td><b>${esc(m.engine)}</b></td>
+    <td class="mono">${esc(m.path)}</td>
+    <td class="mono">${m.maxLeaseH
+      ? `${m.maxLeaseH}h` + (m.tuned ? '' : ` <span class="req-mark">(mặc định)</span>`)
+      : '<span class="muted">không áp dụng</span>'}</td>
+    <td class="text-center">${m.tuned
+      ? '<span class="st st-ok">đã tune</span>'
+      : '<span class="st st-idle">để mặc định</span>'}</td>
+    <td class="muted" style="font-size:12px">${m.note}</td>
+  </tr>`).join('');
+
+  const roleRows = ROLES.map(r => `<tr>
+    <td class="mono">${esc(r.name)}</td>
+    <td><span class="tag-type ${r.type === 'PKI' ? 'tag-B' : 'tag-A'}">${esc(r.type)}</span></td>
+    <td>${esc(r.desc)}</td>
+    <td class="mono" style="font-size:12px">${r.domains
+      ? 'allowed_domains=' + esc(r.domains)
+      : 'kết nối ' + esc(r.conn)}</td>
+    <td class="mono">${r.maxTtlH}h</td>
+    <td class="text-center">${DB.keys.filter(k => k.role === r.name).length}</td>
+  </tr>`).join('');
+
+  const connRows = CONNS.map(c => `<tr>
+    <td class="mono">${esc(c.name)}</td>
+    <td class="mono" style="font-size:12px">${esc(c.plugin)}</td>
+    <td class="mono" style="font-size:12px">${esc(c.url)}</td>
+    <td class="mono" style="font-size:12px">${esc(c.roles)}</td>
+  </tr>`).join('');
+
+  return `
+  ${note('Màn này <b>chỉ để xem</b>, không sửa được gì. Toàn bộ do <b>admin hạ tầng</b> làm trực tiếp trên OpenBao trước khi anh Tộ tạo khóa.<br>Dựng màn này vì hai lý do: (1) giải thích cái dropdown <b>Role</b> lúc tạo khóa ở đâu ra, (2) khi thời hạn bị từ chối thì biết ngay vướng trần nào mà đi hỏi ai.')}
+
+  <div class="card">
+    <div class="card-header">Thiết lập hạ tầng OpenBao <span class="ro-badge">CHỈ ĐỌC</span></div>
+    <div class="card-body font-size-14">
+
+      <div class="setup-sec">
+        <h4>1. Engine đã bật và trần thời hạn của mount ${tt('f_ttlcap')}</h4>
+        <div class="sub">Mount là chỗ engine được gắn vào OpenBao. <b>Trần <code>max_lease_ttl</code> mặc định là ${SYS_MAX_LEASE_H}h (~32 ngày)</b> — không tune thì không cấp nổi chứng thư 12 tháng dù role có cho phép.</div>
+        <div class="ui-table"><table>
+          <thead><tr><th style="width:110px">Engine</th><th style="width:100px">Mount path</th>
+            <th style="width:150px">max_lease_ttl</th><th style="width:110px">Trạng thái</th><th>Ghi chú</th></tr></thead>
+          <tbody>${mountRows}</tbody>
+        </table></div>
+      </div>
+
+      <div class="setup-sec">
+        <h4>2. Role do admin tạo sẵn ${tt('f_role')}</h4>
+        <div class="sub">Chỉ <b>PKI</b> và <b>Database</b> cần role. Role là hàng rào thật nằm dưới OpenBao — nó chặn domain và trần thời hạn, <b>không phụ thuộc vào việc CMS kiểm tra đúng hay sai</b>. Màn tạo khóa chỉ được <b>chọn</b>, không tạo mới.</div>
+        <div class="ui-table"><table>
+          <thead><tr><th style="width:200px">Tên role</th><th style="width:100px">Engine</th><th>Mục đích</th>
+            <th>Ràng buộc</th><th style="width:90px">max_ttl</th><th style="width:90px">Đang dùng</th></tr></thead>
+          <tbody>${roleRows}</tbody>
+        </table></div>
+      </div>
+
+      <div class="setup-sec">
+        <h4>3. Kết nối CSDL ${tt('f_conn')}</h4>
+        <div class="sub">Chỉ engine <b>Database</b> cần. Mỗi role Database phải trỏ vào một kết nối có sẵn. Tài khoản OpenBao dùng để kết nối <b>phải có quyền tạo/xóa user</b> trên CSDL thật, nếu không thì xin credential sẽ lỗi ngay ở phía CSDL.</div>
+        <div class="ui-table"><table>
+          <thead><tr><th style="width:170px">Tên kết nối</th><th style="width:210px">plugin_name</th>
+            <th>connection_url</th><th style="width:180px">allowed_roles</th></tr></thead>
+          <tbody>${connRows}</tbody>
+        </table></div>
+      </div>
+
+      <div class="setup-sec" style="margin-bottom:0">
+        <h4>4. Điều kiện chung — thiếu là mọi API đều lỗi ${tt('f_prereq')}</h4>
+        <div class="ui-table"><table>
+          <thead><tr><th style="width:260px">Điều kiện</th><th style="width:120px">Lỗi nếu thiếu</th><th>Giải thích</th></tr></thead>
+          <tbody>
+            <tr><td><b>OpenBao đã unseal</b></td><td class="mono">503</td>
+              <td class="muted" style="font-size:12px">Mới khởi động là trạng thái sealed, phải mở khóa bằng unseal key hoặc auto-unseal trước khi nhận bất kỳ request nào.</td></tr>
+            <tr><td><b>Token còn hạn</b></td><td class="mono">403</td>
+              <td class="muted" style="font-size:12px">Gắn ở header <code>X-Vault-Token</code>. Đây là TTL của <b>token</b>, khác TTL của khóa — token hết hạn thì mọi thứ dừng.</td></tr>
+            <tr><td><b>Policy cho đúng path</b></td><td class="mono">403</td>
+              <td class="muted" style="font-size:12px">Token còn hạn vẫn bị chặn nếu policy không cấp quyền trên <code>transit/keys/*</code>, <code>pki/issue/*</code>…</td></tr>
+            <tr><td><b>Đúng namespace</b></td><td class="mono">404</td>
+              <td class="muted" style="font-size:12px">Nếu hệ thống chia namespace mà thiếu header <code>X-Vault-Namespace</code> thì tìm nhầm chỗ, báo không tồn tại.</td></tr>
+            <tr><td><b>PKI: đã có CA</b></td><td class="mono">400</td>
+              <td class="muted" style="font-size:12px">Chưa sinh/ký CA thì <code>pki/issue</code> lỗi. Chứng thư cũng <b>không sống lâu hơn CA</b> cấp ra nó.</td></tr>
+          </tbody>
+        </table></div>
+      </div>
+
+    </div>
+  </div>`;
+}
+
+/* ---------------- MÀN 4 — NHẬT KÝ ---------------- */
 function viewAudit() {
   const rows = DB.audit.map((a, i) => `<tr>
       <td class="text-center">${i + 1}</td>
       <td class="nowrap mono">${esc(a.at)}</td>
-      <td>${(a.act.indexOf('TẠM KHÓA') === 0 || a.act.indexOf('Thu hồi') >= 0) ? `<b class="req-mark">${esc(a.act)}</b>` : esc(a.act)}</td>
+      <td>${a.act.indexOf('Thu hồi') >= 0 ? `<b class="req-mark">${esc(a.act)}</b>` : esc(a.act)}</td>
       <td class="mono">${esc(a.obj)}</td>
       <td>${a.reason ? esc(a.reason) : '<span class="muted">—</span>'}</td>
     </tr>`).join('');
@@ -862,6 +1124,26 @@ function openNew() {
         <select class="form-control" id="nKt">${KEY_TYPES.map(t => `<option value="${t.code}">${esc(t.name)}</option>`).join('')}</select>
         <div class="src-note" id="nKtNote"></div></div>
 
+      <div class="col-12 form-group">${lb('Cách tạo khóa', 'f_create', 1)}
+        <select class="form-control" id="nCreate"></select>
+        <div id="nCreateAffect"></div></div>
+
+      <div class="col-12 form-group" id="nRoleWrap" style="display:none">
+        ${lb('Role', 'f_role', 1)}
+        <select class="form-control" id="nRole"></select>
+        <div class="src-note" id="nRoleNote"></div></div>
+
+      <div class="col-12 form-group" id="nCsrWrap" style="display:none">
+        ${lb('CSR', 'f_csr', 1)}
+        <textarea class="form-control" id="nCsr" rows="3" placeholder="-----BEGIN CERTIFICATE REQUEST-----&#10;..."></textarea>
+        <div class="src-note">Tự sinh bằng: <code>openssl req -new -newkey rsa:2048 -nodes -keyout svc.key -out svc.csr</code></div></div>
+
+      <div class="col-12 form-group" id="nValWrap" style="display:none">
+        ${lb('Giá trị secret', 'f_kvvalue', 1)}
+        <input class="form-control mono" id="nValKey" placeholder="Tên trường, ví dụ: api_key" style="margin-bottom:6px">
+        <textarea class="form-control mono" id="nVal" rows="2" placeholder="Dán giá trị vào đây"></textarea>
+        <div class="src-note" id="nValNote"></div></div>
+
       <div class="col-md-5 form-group">${lb('Thời hạn hiệu lực', 'f_ttl', 1)}
         <select class="form-control" id="nTtl"></select>
         <div id="nTtlAffect"></div></div>
@@ -885,9 +1167,50 @@ function openNew() {
 
 /** Toàn bộ quy tắc phụ thuộc giữa các ô nằm ở đây. */
 function syncNew() {
-  const sO = $('#nObj'), sK = $('#nKt'), sT = $('#nTtl'), sA = $('#nAlgo');
-  if (!sO || !sK || !sT || !sA) return;
+  const sO = $('#nObj'), sK = $('#nKt'), sT = $('#nTtl'), sA = $('#nAlgo'), sC = $('#nCreate');
+  if (!sO || !sK || !sT || !sA || !sC) return;
   const o = OBJ(sO.value), t = KT(sK.value);
+
+  // 0. Loại khóa → các cách tạo mà engine THẬT SỰ hỗ trợ
+  const keepC = sC.value;
+  const modes = t.create || [{ v: 'gen', l: 'OpenBao sinh khóa mới', ep: '' }];
+  sC.innerHTML = modes.map(m => `<option value="${m.v}" ${m.v === keepC ? 'selected' : ''}>${esc(m.l)}</option>`).join('');
+  if (!modes.some(m => m.v === sC.value)) sC.value = modes[0].v;
+  const mode = modes.find(m => m.v === sC.value) || modes[0];
+
+  $('#nCreateAffect').innerHTML = `<div class="affect">
+    <b>→ gọi <code>${esc(mode.ep)}</code></b>
+    ${modes.length === 1
+      ? `<br><b>Loại khóa này chỉ có một cách.</b> ${t.noImport || ''}`
+      : `<br>Loại khóa này có <b>${modes.length} cách</b>, chọn cách nào thì form bên dưới đổi theo.`}
+    ${mode.v === 'csr' ? '<br><span style="color:#1b7a4b">Private key không rời khỏi máy mình — OpenBao chỉ ký CSR.</span>' : ''}
+    ${mode.v === 'gen' && t.code === 'CERT' ? '<br><span class="req-mark">OpenBao trả private key về MỘT LẦN duy nhất, sau đó không lấy lại được.</span>' : ''}
+  </div>`;
+
+  // 0b. Role — chỉ hiện với PKI và Database, do admin tạo trước
+  const rw = $('#nRoleWrap'), sR = $('#nRole');
+  if (t.role) {
+    rw.style.display = '';
+    const list = rolesOf(t.role), keepR = sR.value;
+    sR.innerHTML = list.map(r => `<option value="${esc(r.name)}" ${r.name === keepR ? 'selected' : ''}>${esc(r.name)} — ${esc(r.desc)}</option>`).join('');
+    const r = ROLE(sR.value) || list[0];
+    $('#nRoleNote').innerHTML = r
+      ? `Do admin tạo sẵn · ${r.domains ? 'chỉ cấp cho <code>' + esc(r.domains) + '</code>' : 'kết nối <code>' + esc(r.conn) + '</code>'} · trần <b>${ttlLabel(t, r.maxTtlH) || r.maxTtlH + 'h'}</b>`
+      : '';
+  } else { rw.style.display = 'none'; }
+
+  // 0c. CSR — chỉ khi chọn cách nộp CSR
+  $('#nCsrWrap').style.display = mode.v === 'csr' ? '' : 'none';
+
+  // 0d. Giá trị secret — chỉ với KV v2
+  const vw = $('#nValWrap');
+  vw.style.display = t.engine === 'KV v2' ? '' : 'none';
+  if (t.engine === 'KV v2') {
+    $('#nVal').disabled = mode.v === 'gen';
+    $('#nValNote').innerHTML = mode.v === 'gen'
+      ? 'CMS sinh chuỗi ngẫu nhiên rồi ghi vào KV. Ô giá trị để trống.'
+      : '<b>Đây là loại duy nhất nhập tay là bình thường</b> — API key bên thứ ba thì mình không tự sinh được.';
+  }
 
   // 1. Đối tượng → phạm vi → luồng + hồ sơ bắt buộc hay không
   $('#nObjAffect').innerHTML = `<div class="affect">${extTag(o.ext)}
@@ -907,34 +1230,61 @@ function syncNew() {
   const keepT = +sT.value;
   sT.innerHTML = t.ttl.map(x => `<option value="${x.h}" ${x.h === (t.ttl.some(y => y.h === keepT) ? keepT : t.ttlDef) ? 'selected' : ''}>${esc(x.l)}</option>`).join('');
 
-  // 3. Thời hạn → trường API + cách hết hạn
+  // 3. Thời hạn → trường API + cách hết hạn + các trần đang chặn
   const h = +sT.value;
+  const mnt = MOUNT(t.engine), cap = ttlCeiling(t, sR ? sR.value : '', h);
+  const capLine = cap
+    ? `<div class="affect bad"><b>⛔ Vượt trần ${cap.kind === 'role' ? 'của role' : 'của mount'} —
+        ${esc(cap.name)} chỉ cho tối đa <code>${cap.limitH}h</code>.</b>
+        ${cap.kind === 'mount' && !cap.tuned
+        ? ` Mount này đang để mặc định <code>${SYS_MAX_LEASE_H}h</code> của OpenBao.`
+        : ''} OpenBao sẽ từ chối request. ${tt('f_ttlcap')}</div>`
+    : (t.ttlField && mnt && mnt.maxLeaseH
+      ? `<div class="affect ok">✔ Lọt trần: role, mount <code>${esc(mnt.path)}</code>
+          (<code>max_lease_ttl ${mnt.maxLeaseH}h</code>) và hệ thống. ${tt('f_ttlcap')}</div>`
+      : '');
   $('#nTtlAffect').innerHTML = `<div class="affect">
     ${t.ttlField
       ? `<b>→ gửi xuống <code>${t.ttlField}: "${h}h"</code></b>`
       : '<b>→ KHÔNG gửi xuống OpenBao.</b> KV v2 không có TTL.'}
-    <br>${t.ttlNote}</div>`;
+    <br>${t.ttlNote}</div>${capLine}`;
 
   // 4. Thuật toán → trường API
   $('#nAlgoNote').innerHTML = t.engine === 'Transit' ? `→ <code>type=${esc(sA.value)}</code>`
     : t.engine === 'PKI' ? `→ <code>key_type=${esc(sA.value.split('/')[0])}</code>, <code>key_bits=${esc(sA.value.split('/')[1])}</code>`
       : `engine <b>${esc(t.engine)}</b> không dùng thuật toán`;
 
-  // 5. Tóm tắt: tên khóa tự sinh + ngày hết hạn
-  const bao = baoName(o, t);
+  // 5. Tóm tắt: tên khóa tự sinh + ngày hết hạn + tải được gì
+  const bao = baoName(o, t, sR ? sR.value : '');
   const exp = t.ttlField || t.code === 'SEC' ? addHours(h) : '';
+  const dl = dlLabel(t, sA.value);
   $('#nSummary').innerHTML = `<b>CMS sẽ tự sinh:</b>
     <table style="width:100%;margin-top:6px;font-size:13px">
-      <tr><td style="width:190px;color:#767574">Mã khóa</td><td class="mono">KEY-2026-0xxx</td></tr>
-      <tr><td style="color:#767574">Tên trong OpenBao ${tt('f_baoname')}</td><td class="mono">${esc(bao)}</td></tr>
+      <tr><td style="width:210px;color:#767574">Mã khóa</td><td class="mono">KEY-2026-0xxx</td></tr>
+      <tr><td style="color:#767574">Đường dẫn trong OpenBao ${tt('f_baoname')}</td><td class="mono">${esc(bao)}</td></tr>
       <tr><td style="color:#767574">Ngày hết hạn</td><td>${fmt(exp)} <span class="muted">(hôm nay + ${ttlLabel(t, h)})</span></td></tr>
       <tr><td style="color:#767574">Trạng thái sau khi tạo</td><td>${stBadge(o.ext ? 'CHUA_XONG' : 'HIEU_LUC')}</td></tr>
+      <tr><td style="color:#767574">Tải xuống được ${tt('f_download')}</td><td>${dl
+      ? esc(dl)
+      : '<span class="muted">không có gì để tải — đây là giá trị bí mật, ứng dụng phải tự lấy</span>'}</td></tr>
     </table>`;
 }
 
-function baoName(o, t) {
-  const purpose = { SIGN: 'sign', ENC: 'enc', CERT: 'tls', DBC: 'db', SEC: 'secret' }[t.code];
-  const prefix = t.engine === 'PKI' ? 'pki/issue/' : t.engine === 'Database' ? 'database/roles/' : t.engine === 'KV v2' ? 'kv/data/' : 'transit/keys/';
+/** Tải xuống được gì — phụ thuộc engine và thuật toán. */
+function dlLabel(t, algo) {
+  if (t.dl === 'public') return 'Public key (.pem)';
+  if (t.dl === 'cert') return 'Certificate + CA chain (.pem)';
+  if (t.dl === 'public-if-rsa') return /^rsa/.test(algo || '') ? 'Public key (.pem)' : '';
+  return '';
+}
+
+/** Đường dẫn thật trong OpenBao.
+ *  PKI và Database dùng ROLE do admin tạo sẵn — KHÔNG sinh role riêng cho từng khóa. */
+function baoName(o, t, roleName) {
+  if (t.engine === 'PKI') return 'pki/issue/' + (roleName || ':role');
+  if (t.engine === 'Database') return 'database/creds/' + (roleName || ':role');
+  const purpose = { SIGN: 'sign', ENC: 'enc', SEC: 'secret' }[t.code] || 'key';
+  const prefix = t.engine === 'KV v2' ? 'kv/data/' : 'transit/keys/';
   return prefix + 'scorehub-' + o.code.toLowerCase() + '-' + purpose + '-2026';
 }
 
@@ -969,6 +1319,14 @@ function openDeliv(id) {
       <button class="btn btn-primary ml-2" data-act="doDeliv" data-id="${id}">Lưu</button>`));
 }
 
+/** Serial giả lập cho chứng thư PKI — dạng hex ngăn bằng dấu hai chấm như OpenBao trả về. */
+function randSerial(seedStr) {
+  let r = seedStr.split('').reduce((a, ch) => (a * 33 + ch.charCodeAt(0)) >>> 0, 5381);
+  const b = [];
+  for (let i = 0; i < 10; i++) { r = (r * 1103515245 + 12345) >>> 0; b.push(('0' + (r % 256).toString(16)).slice(-2)); }
+  return b.join(':');
+}
+
 /* ---- Public key giả lập, khác nhau theo mã khóa + phiên bản ---- */
 function fakePem(id, v) {
   const seed = (id + 'v' + v).split('').reduce((a, ch) => (a * 31 + ch.charCodeAt(0)) >>> 0, 7);
@@ -979,35 +1337,72 @@ function fakePem(id, v) {
   return '-----BEGIN PUBLIC KEY-----\n' + lines + '\nIDAQAB\n-----END PUBLIC KEY-----';
 }
 
+/** Loại khóa này tải xuống được gì — rỗng nghĩa là không có gì để tải. */
+function dlOf(k) { return dlLabel(KT(k.kt), k.algo); }
+
 function openPubkey(id) {
-  const k = DB.keys.find(x => x.id === id), t = KT(k.kt);
+  const k = DB.keys.find(x => x.id === id), t = KT(k.kt), e = EX(k.id);
+  const isCert = t.engine === 'PKI';
+  const what = dlOf(k);
+
+  if (!what) {
+    modal(shell(`<i class="fa fa-ban"></i> ${esc(k.id)}`, `
+      <div class="hint bad"><b>Loại khóa này không có gì để tải xuống.</b> ${tt('f_download')}
+        <div class="mt-2">${t.engine === 'Transit'
+        ? `Thuật toán <code>${esc(k.algo)}</code> là <b>khóa đối xứng</b> — chỉ có một khóa duy nhất, không có nửa công khai để đưa ra ngoài.`
+        : t.engine === 'Database'
+          ? 'Credential CSDL là <b>user/password bí mật</b>. Ứng dụng tự gọi <code>GET /v1/database/creds/:role</code> để lấy, mỗi lần một bộ mới.'
+          : 'Giá trị trong KV v2 là <b>bí mật</b>. Ứng dụng tự đọc <code>GET /v1/kv/data/:path</code>, không tải qua CMS.'}</div></div>
+    `, `<button class="btn btn-secondary" data-close="1">Đóng</button>`, 'sm'));
+    return;
+  }
+
   const v = window.__pkv || k.ver;
   const vers = []; for (let i = 1; i <= k.ver; i++) vers.push(i);
-  const pem = fakePem(k.id, v);
+  const body = isCert ? fakeCert(k.id, e.serial) : fakePem(k.id, v);
   const needSend = k.status === 'CHUA_XONG' && v === k.ver;
 
-  modal(shell(`<i class="fa fa-eye"></i> Public key — ${esc(k.id)}`, `
-    <div class="hint"><b>Đây là nửa công khai của cặp khóa — gửi cho đối tác được, không phải bí mật.</b>
-      Private key nằm trong OpenBao, CMS không bao giờ nhìn thấy. ${tt('f_pubkey')}</div>
+  modal(shell(`<i class="fa fa-eye"></i> ${isCert ? 'Chứng thư' : 'Public key'} — ${esc(k.id)}`, `
+    <div class="hint"><b>${isCert
+      ? 'Chứng thư và chuỗi CA — gửi ra ngoài được, không phải bí mật.'
+      : 'Đây là nửa công khai của cặp khóa — gửi cho đối tác được, không phải bí mật.'}</b>
+      ${isCert ? tt('f_pkikey') : 'Private key nằm trong OpenBao, CMS không bao giờ nhìn thấy. ' + tt('f_pubkey')}</div>
 
-    <div class="form-group"><label>Chọn phiên bản${tt('f_version')}</label>
+    ${isCert ? `<div class="hint warn"><b>Private key thì KHÔNG hiện ở đây.</b>
+      ${k.createMode === 'csr'
+        ? 'Khóa này tạo bằng cách <b>nộp CSR</b> — private key vẫn nằm trên máy người xin, OpenBao chưa từng thấy nó.'
+        : 'Khóa này để <b>OpenBao sinh</b> — private key đã trả về đúng một lần lúc cấp và không lưu lại ở đâu. Mất là phải cấp chứng thư mới.'}</div>`
+      : `<div class="form-group"><label>Chọn phiên bản${tt('f_version')}</label>
       <select class="form-control" id="pkVer" style="max-width:340px">
         ${vers.reverse().map(i => `<option value="${i}" ${i === v ? 'selected' : ''}>v${i}${i === k.ver ? ' — mới nhất' : ''}${i === k.activeVer ? ' · ĐANG DÙNG ĐỂ KÝ' : ''}</option>`).join('')}
-      </select></div>
+      </select></div>`}
 
-    ${needSend ? `<div class="hint warn"><b>Đây là bản cần gửi cho đối tác.</b>
+    ${needSend && !isCert ? `<div class="hint warn"><b>Đây là bản cần gửi cho đối tác.</b>
       Con trỏ vẫn đang ở <b>v${k.activeVer}</b> nên giao dịch chưa bị ảnh hưởng.
       Gửi xong và đối tác xác nhận thì mới đổi con trỏ sang v${k.ver}.</div>` : ''}
 
-    <div class="pem-box" id="pemBox">${esc(pem)}</div>
+    <div class="pem-box" id="pemBox">${esc(body)}</div>
     <div class="mt-2">
       <button class="btn btn-primary btn-sm" data-act="copyPem"><i class="fa fa-copy"></i> Copy</button>
+      <button class="btn btn-primary btn-sm ml-2" data-act="dlPem" data-id="${k.id}"><i class="fa fa-download"></i> Tải xuống</button>
+      <span class="ml-2">${tt('f_download')}</span>
       <span class="src-note ml-2" id="copyMsg"></span>
     </div>
     <div class="src-note mt-3">CMS lấy trực tiếp từ OpenBao mỗi lần mở:
-      <code>GET /v1/${esc(t.engine === 'PKI' ? 'pki/cert/&lt;serial&gt;' : k.bao)}</code> — không lưu bản sao để tránh lệch.</div>
+      <code>GET /v1/${esc(isCert ? 'pki/cert/' + (e.serial || '&lt;serial&gt;') : k.bao)}</code> — không lưu bản sao để tránh lệch.</div>
   `, `<button class="btn btn-secondary" data-close="1">Đóng</button>`));
   window.__pkId = id;
+}
+
+/** Chứng thư giả lập — để demo nút tải xuống. */
+function fakeCert(id, serial) {
+  return '-----BEGIN CERTIFICATE-----\n' + fakePem(id + 'cert', 1)
+    .replace(/-----(BEGIN|END) PUBLIC KEY-----\n?/g, '')
+    + '\n-----END CERTIFICATE-----\n'
+    + '\n# serial_number: ' + (serial || '—')
+    + '\n\n-----BEGIN CERTIFICATE-----\n' + fakePem(id + 'ca', 1)
+      .replace(/-----(BEGIN|END) PUBLIC KEY-----\n?/g, '')
+    + '\n-----END CERTIFICATE-----\n# ↑ issuing_ca';
 }
 
 function openRotate(id) {
@@ -1059,12 +1454,19 @@ function openDetail(id) {
       <div class="k">Đối tượng sử dụng</div><div class="v">${esc(k.obj)} ${extTag(ext)}</div>
       <div class="k">Hồ sơ ràng buộc</div><div class="v">${k.dossier ? esc(k.dossier) : '<span class="muted">không có</span>'}</div>
       <div class="k">Loại khóa</div><div class="v">${esc(t.name)} <span class="muted">→ engine ${esc(t.engine)}</span></div>
+      <div class="k">Cách tạo ${tt('f_create')}</div><div class="v" style="font-weight:400">${esc(
+      ((t.create || []).find(m => m.v === (k.createMode || 'gen')) || { l: 'OpenBao sinh khóa mới' }).l)}</div>
+      ${k.role ? `<div class="k">Role ${tt('f_role')}</div><div class="v mono">${esc(k.role)}
+        <span class="muted" style="font-weight:400;font-family:inherit"> — do admin tạo sẵn</span></div>` : ''}
       <div class="k">Thuật toán</div><div class="v">${esc(k.algo)}</div>
-      <div class="k">Phiên bản trong OpenBao ${tt('f_version')}</div><div class="v">v1 … v${k.ver}</div>
+      ${t.engine === 'Transit' ? `<div class="k">Phiên bản trong OpenBao ${tt('f_version')}</div><div class="v">v1 … v${k.ver}</div>
       <div class="k">Đang ký bằng ${tt('f_pointer')}</div><div class="v">${k.activeVer === k.ver
         ? `v${k.activeVer}`
-        : `<span class="req-mark">v${k.activeVer}</span> <span class="muted">— chưa chuyển sang v${k.ver}, chờ đối tác xác nhận</span>`}</div>
-      <div class="k">Public key ${tt('f_pubkey')}</div><div class="v"><span class="linkish" data-act="pubkey" data-id="${k.id}"><i class="fa fa-eye"></i> Xem &amp; copy</span></div>
+        : `<span class="req-mark">v${k.activeVer}</span> <span class="muted">— chưa chuyển sang v${k.ver}, chờ đối tác xác nhận</span>`}</div>` : ''}
+      ${dlOf(k)
+      ? `<div class="k">${t.engine === 'PKI' ? 'Chứng thư' : 'Public key'} ${tt(t.engine === 'PKI' ? 'f_pkikey' : 'f_pubkey')}</div>
+         <div class="v"><span class="linkish" data-act="pubkey" data-id="${k.id}"><i class="fa fa-download"></i> Xem · copy · tải xuống</span></div>`
+      : `<div class="k">Tải xuống ${tt('f_download')}</div><div class="v muted" style="font-weight:400">không có gì đưa ra ngoài được</div>`}
       <div class="k">Thời hạn</div><div class="v">${ttlLabel(t, k.ttlH)} <span class="muted">(${k.ttlH}h)</span></div>
       <div class="k">Hiệu lực</div><div class="v">${fmt(k.eff)} → ${fmt(k.exp)}</div>
       <div class="k">Trạng thái</div><div class="v">${stBadge(k.status)}</div>
@@ -1073,7 +1475,11 @@ function openDetail(id) {
       <div class="k">Đối tác xác nhận</div><div class="v" style="font-weight:400">${k.cfAt ? `${fmt(k.cfAt)} · ${esc(k.cfBy)}` : '<span class="muted">chưa</span>'}</div>` : ''}
       <div class="k">Tên trong OpenBao ${tt('f_baoname')}</div><div class="v mono">${esc(k.bao)}</div>
     </div>
-    <div class="hint mt-3"><b><i class="fa fa-lock"></i></b> Màn hình này <b>không bao giờ hiển thị private key</b>.</div>`;
+    <div class="hint mt-3"><b><i class="fa fa-lock"></i></b> ${t.engine === 'PKI'
+      ? `Màn hình này <b>không hiển thị private key</b> — và với chứng thư thì <b>không nơi nào hiển thị lại được</b>. ${tt('f_pkikey')}`
+      : t.engine === 'Transit'
+        ? 'Private key <b>chưa bao giờ rời khỏi OpenBao</b>. CMS chỉ gửi dữ liệu sang để OpenBao ký hộ.'
+        : 'Giá trị bí mật không đi qua CMS — ứng dụng tự gọi OpenBao để lấy.'}</div>`;
   } else if (tab === 'api') {
     const p = apiParams(k);
     body = `<div class="hint">Trường do <b>OpenBao quy định</b> — tên không đổi được. CMS tự dịch từ hồ sơ. Bấm <i class="tt">i</i> để xem chi tiết từng trường.
@@ -1106,51 +1512,12 @@ function openDetail(id) {
   window.__detailId = id;
 }
 
-function openLock(id) {
-  const k = DB.keys.find(x => x.id === id), e = EX(k.id), eng = KT(k.kt).engine, L3 = LOCK3[eng];
-
-  if (!L3.ok) {
-    modal(shell(`<i class="fa fa-lock"></i> Tạm khóa — ${esc(id)}`, `
-      <div class="hint bad"><b>Engine ${esc(eng)} không hỗ trợ tạm khóa.</b><br>${L3.why}</div>
-      <div class="hint">Nếu cần dừng khóa này thì chỉ có <b>Thu hồi</b> — vĩnh viễn, không khôi phục được.</div>
-    `, `<button class="btn btn-secondary" data-close="1">Đóng</button>`, 'sm'));
-    return;
-  }
-
-  modal(shell(`<i class="fa fa-lock"></i> Tạm khóa — ${esc(id)}`, `
-    <div class="src-note mb-2">Engine <b>${esc(eng)}</b> — cơ chế chặn thật khác nhau theo engine.</div>
-    <div class="form-group">${lb('Mức tạm khóa', 'f_lockLevel', 1)}
-      <select class="form-control" id="lockLevel">
-        <option value="1">Mức 1 — Hành chính: chỉ đánh dấu trên sổ</option>
-        <option value="2">Mức 2 — Chặn xoay / cấp thêm / bàn giao</option>
-        <option value="3" selected>${esc(L3.label)}</option>
-      </select></div>
-    <div id="lockEffect" data-eng="${esc(eng)}"></div>
-    <div class="form-group">${lb('Lý do tạm khóa', 'f_lockReason', 1)}
-      <textarea class="form-control" id="lockReason" rows="3" placeholder="Nghi ngờ lộ khóa theo PYC-… / hợp đồng tạm dừng / hệ thống bảo trì"></textarea></div>
-    <div class="src-note">Đường dẫn: <code>${esc(k.bao)}</code>${e.latest ? ' · latest_version = <code>' + e.latest + '</code>' : ''}</div>
-  `, `<button class="btn btn-secondary" data-close="1">Hủy</button>
-      <button class="btn btn-primary ml-2" data-act="doLock" data-id="${id}"><i class="fa fa-lock"></i> Xác nhận</button>`, 'sm'));
-  window.__lockEng = eng;
-  lockEffect();
-}
-function lockEffect() {
-  const el = $('#lockEffect'); if (!el) return;
-  const L3 = LOCK3[window.__lockEng] || LOCK3.Transit;
-  const m = {
-    '1': ['hint', '<b>Không gọi API.</b> Nghiệp vụ vẫn chạy bình thường, chỉ đánh dấu trên sổ.'],
-    '2': ['hint warn', '<b>Không gọi API.</b> Chặn ở tầng CMS: không cho xoay / cấp thêm / bàn giao. Khóa vẫn dùng được.'],
-    '3': ['hint bad', L3.effect],
-  };
-  const [c, t] = m[$('#lockLevel').value] || m['3'];
-  el.innerHTML = `<div class="${c}">${t}</div>`;
-}
-
 function openRevoke(id) {
   const k = DB.keys.find(x => x.id === id), t = KT(k.kt);
   const how = { Transit: '<code>config</code> · <code>min_decryption_version</code> = latest + 1', PKI: '<code>POST /v1/pki/revoke</code> · <code>serial_number</code>', Database: '<code>POST /v1/sys/leases/revoke</code> · <code>lease_id</code>', 'KV v2': '<code>DELETE /v1/kv/metadata/:path</code>' }[t.engine];
   modal(shell(`<i class="fa fa-ban"></i> Thu hồi — ${esc(id)}`, `
-    <div class="hint bad"><b>Thu hồi là vĩnh viễn.</b> Muốn tạm dừng mà còn khôi phục được thì dùng <b>Tạm khóa</b>. ${tt('f_revoke')}</div>
+    <div class="hint bad"><b>Thu hồi là vĩnh viễn — không có thao tác hoàn tác.</b>
+      Công cụ <b>không có chức năng tạm dừng</b>: OpenBao không hỗ trợ trạng thái đó, nên nghiệp vụ chỉ có dùng hoặc khai tử. ${tt('f_revoke')}</div>
     <div class="form-group">${lb('Lý do thu hồi', 'f_lockReason', 1)}
       <textarea class="form-control" id="revReason" rows="3" placeholder="Đã xác định lộ khóa / chấm dứt hợp đồng / cấp nhầm"></textarea></div>
     <div class="src-note">Engine <b>${esc(t.engine)}</b> → CMS sẽ gọi: ${how}</div>
@@ -1206,7 +1573,7 @@ function hideTip() {
 const route = () => (location.hash.replace('#/', '') || 'keys');
 function render() {
   const r = route();
-  const fn = { keys: viewKeys, objs: viewObjs, audit: viewAudit }[r] || viewKeys;
+  const fn = { keys: viewKeys, objs: viewObjs, setup: viewSetup, audit: viewAudit }[r] || viewKeys;
   $('#crumb').innerHTML = `<div style="display:flex;align-items:center;justify-content:space-between">
     <span><i class="fa fa-home"></i> Trang chủ <span class="sep">/</span> Quản trị khóa <span class="sep">/</span> <b>${esc(TITLES[r] || '')}</b></span>
     <span><label style="margin:0;cursor:pointer;user-select:none">
@@ -1245,6 +1612,24 @@ document.addEventListener('click', (e) => {
     case 'new': openNew(); break;
     case 'deliv': openDeliv(id); break;
     case 'pubkey': window.__pkv = null; openPubkey(id); break;
+    case 'dlPem': {
+      const k = K(), t2 = KT(k.kt);
+      const txt = $('#pemBox').textContent || '';
+      const isCert = t2.engine === 'PKI';
+      const fname = k.id.toLowerCase() + (isCert ? '-certificate.pem' : '-public-key.pem');
+      try {
+        const blob = new Blob([txt], { type: 'application/x-pem-file' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = fname;
+        document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        setTimeout(function () { URL.revokeObjectURL(url); }, 2000);
+      } catch (err) { alert('Trình duyệt chặn tải tệp. Dùng nút Copy thay thế.'); return; }
+      const m = $('#copyMsg');
+      if (m) m.innerHTML = `<span style="color:#1b7a4b"><i class="fa fa-check"></i> Đã tải <b>${esc(fname)}</b></span>`;
+      log('Tải xuống', k.id, `${isCert ? 'certificate + ca_chain' : 'public key'} · tệp ${fname}`);
+      break;
+    }
     case 'copyPem': {
       const txt = $('#pemBox').textContent || '';
       const done = () => { const m = $('#copyMsg'); if (m) m.innerHTML = '<span style="color:#1b7a4b"><i class="fa fa-check"></i> Đã copy — dán vào email gửi đối tác</span>'; };
@@ -1257,7 +1642,6 @@ document.addEventListener('click', (e) => {
       }
       break;
     }
-    case 'lock': openLock(id); break;
     case 'revoke': openRevoke(id); break;
     case 'addobj': openAddObj(); break;
     case 'advToggle': { const a = $('#nAdv'); a.style.display = a.style.display === 'none' ? 'block' : 'none'; break; }
@@ -1275,25 +1659,6 @@ document.addEventListener('click', (e) => {
         k.activeVer = k.ver; k.exp = addHours(k.ttlH);
         log('Xoay khóa', k.id, `POST /v1/transit/keys/…/rotate → v${k.ver}. Nội bộ: đổi con trỏ ngay sang v${k.ver}`);
       }
-      closeModal(); render(); break;
-    }
-    case 'unlock': {
-      const k = K();
-      if (!confirm(`Mở khóa ${k.id}?\n\nCMS sẽ gọi: min_encryption_version = 0`)) return;
-      k.status = 'HIEU_LUC'; k.lockReason = '';
-      if (EXTRA[k.id]) EXTRA[k.id].minEnc = 0;
-      log('MỞ KHÓA', k.id, 'min_encryption_version = 0'); render(); break;
-    }
-    case 'doLock': {
-      const r = $('#lockReason').value.trim();
-      if (!r) { alert('Lý do là bắt buộc — kiểm toán sẽ hỏi tới trường này.'); return; }
-      const lv = +$('#lockLevel').value, k = K(), e = EX(k.id), L3 = LOCK3[KT(k.kt).engine];
-      if (lv === 3 && !L3.ok) { alert('Engine này không tạm khóa được. Chỉ có thể Thu hồi.'); return; }
-      k.status = 'TAM_KHOA'; k.lockReason = `[Mức ${lv}] ${r}`;
-      if (lv === 3 && KT(k.kt).engine === 'Transit' && EXTRA[k.id] && EXTRA[k.id].latest) {
-        EXTRA[k.id].minEnc = EXTRA[k.id].latest + 1;
-      }
-      log('TẠM KHÓA', k.id, lv === 3 ? `Mức 3 — ${L3.cmd(k, e)} · ${r}` : `Mức ${lv} (không gọi API) — ${r}`);
       closeModal(); render(); break;
     }
     case 'doRevoke': {
@@ -1332,22 +1697,65 @@ document.addEventListener('click', (e) => {
     case 'doNew': {
       const o = OBJ($('#nObj').value), t2 = KT($('#nKt').value);
       const dos = $('#nDos').value.trim(), h = +$('#nTtl').value;
+      const mode = $('#nCreate').value, roleName = t2.role ? $('#nRole').value : '';
+
       if (o.ext && (!/\d/.test(dos) || dos.length < 6)) {
         $('#nDos').classList.add('invalid');
         $('#nDosNote').innerHTML = '<span class="req-mark">Đối tượng bên ngoài bắt buộc có hồ sơ: phải có số hiệu, tối thiểu 6 ký tự.</span>';
         return;
       }
+      if (mode === 'csr' && !/BEGIN CERTIFICATE REQUEST/.test($('#nCsr').value)) {
+        alert('Chọn cách nộp CSR thì phải dán nội dung CSR vào.\n\nSinh bằng:\nopenssl req -new -newkey rsa:2048 -nodes -keyout svc.key -out svc.csr');
+        return;
+      }
+      if (t2.engine === 'KV v2' && mode === 'input' && !$('#nVal').value.trim()) {
+        alert('Chọn cách nhập sẵn thì phải dán giá trị secret vào.'); return;
+      }
+      // Thời hạn bị chặn bởi NHIỀU trần chồng nhau — CMS phải chặn trước và nói rõ vướng trần nào
+      const cap = ttlCeiling(t2, roleName, h);
+      if (cap) {
+        const lim = ttlLabel(t2, cap.limitH) || cap.limitH + 'h';
+        alert(cap.kind === 'role'
+          ? `Role "${cap.name}" có trần ${lim} (max_ttl).\n\n`
+            + 'Role là hàng rào do admin dựng sẵn — CMS không vượt qua được.\n'
+            + 'Muốn dài hơn thì phải nhờ admin sửa role, hoặc chọn role khác.'
+          : `Mount "${cap.name}" có trần ${lim} (max_lease_ttl).\n\n`
+            + (cap.tuned
+              ? 'Admin đã tune mount này nhưng vẫn chưa đủ dài.'
+              : `Mount này đang để MẶC ĐỊNH của OpenBao là ${SYS_MAX_LEASE_H}h (~32 ngày).`)
+            + '\n\nĐây là trần dễ quên nhất: role cho phép không có nghĩa là mount cho phép.\n'
+            + `Admin phải chạy: POST /v1/sys/mounts/${cap.name}tune  { "max_lease_ttl": "${h}h" }`);
+        return;
+      }
+
       const nid = (t2.engine === 'Database' || t2.engine === 'KV v2' ? 'CRED-2026-0' : 'KEY-2026-0') + (100 + DB.keys.length);
+      const bao = baoName(o, t2, roleName);
       DB.keys.unshift({
         id: nid, obj: o.n, kt: t2.code, dossier: dos, algo: $('#nAlgo').value, ttlH: h, ver: 1, activeVer: 1,
         status: o.ext ? 'CHUA_XONG' : 'HIEU_LUC',
         eff: o.ext ? '' : TODAY_ISO, exp: o.ext ? '' : addHours(h),
-        bao: baoName(o, t2), lockReason: '', sentAt: '', channel: '', cfAt: '', cfBy: '',
+        bao, lockReason: '', sentAt: '', channel: '', cfAt: '', cfBy: '', createMode: mode, role: roleName,
       });
       EXTRA[nid] = { latest: 1, minDec: 1, minEnc: 0 };
+      if (t2.engine === 'PKI') { EXTRA[nid].pkiRole = roleName; EXTRA[nid].cn = (ROLE(roleName) || {}).domains || '—'; EXTRA[nid].serial = randSerial(nid); }
+      if (t2.engine === 'Database') { EXTRA[nid].dbRole = roleName; EXTRA[nid].leaseId = bao + '/' + nid.slice(-6); EXTRA[nid].leaseDur = h + 'h'; }
+      if (t2.engine === 'KV v2') { EXTRA[nid].kvPath = bao.replace('kv/data/', ''); EXTRA[nid].kvVersion = 1; }
+
+      const modeObj = (t2.create || []).find(m => m.v === mode) || { ep: '' };
       log('Tạo khóa trên OpenBao', nid,
-        `POST /v1/${baoName(o, t2)} · ${t2.ttlField ? t2.ttlField + '=' + h + 'h' : 'không có TTL'}`);
-      closeModal(); window.__f = { q: '', ext: '', qf: o.ext ? 'bangiao' : '' }; render(); break;
+        `${modeObj.ep.replace(':role', roleName || ':role').replace(':name', bao.split('/').pop()).replace(':path', bao.replace('kv/data/', ''))}`
+        + ` · ${t2.ttlField ? t2.ttlField + '=' + h + 'h' : 'KV v2 không có TTL'}`
+        + (mode === 'csr' ? ' · ký CSR, private key không rời máy người dùng' : '')
+        + (mode === 'gen' && t2.engine === 'PKI' ? ' · private key trả về MỘT LẦN' : ''));
+
+      closeModal(); window.__f = { q: '', ext: '', qf: o.ext ? 'bangiao' : '' }; render();
+
+      if (t2.engine === 'PKI' && mode === 'gen') {
+        alert('Chứng thư đã cấp.\n\n'
+          + 'OpenBao vừa trả về private key và KHÔNG giữ lại bản nào.\n'
+          + 'Phải tải xuống ngay — sau khi đóng màn này sẽ không lấy lại được.');
+      }
+      break;
     }
     case 'doAddObj': {
       const code = ($('#aoCode').value || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
@@ -1364,9 +1772,8 @@ document.addEventListener('click', (e) => {
 document.addEventListener('change', (e) => {
   const el = e.target;
   if (el.id === 'tgNotes') { SHOW_NOTES = el.checked; render(); return; }
-  if (el.id === 'lockLevel') { lockEffect(); return; }
   if (el.id === 'pkVer') { window.__pkv = +el.value; openPubkey(window.__pkId); return; }
-  if (['nObj', 'nKt', 'nTtl', 'nAlgo'].indexOf(el.id) >= 0) syncNew();
+  if (['nObj', 'nKt', 'nTtl', 'nAlgo', 'nCreate', 'nRole'].indexOf(el.id) >= 0) syncNew();
 });
 
 window.addEventListener('hashchange', render);
